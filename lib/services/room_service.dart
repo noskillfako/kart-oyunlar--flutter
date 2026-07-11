@@ -1,17 +1,26 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'user_prefs_service.dart';
 
 class RoomService {
-  final _db = FirebaseFirestore.instance;
+  final FirebaseFirestore _db;
+  final FirebaseAuth _auth;
+
+  RoomService({FirebaseFirestore? firestore, FirebaseAuth? auth})
+      : _db = firestore ?? FirebaseFirestore.instance,
+        _auth = auth ?? FirebaseAuth.instance;
 
   /// Yeni bir oda oluşturur, oluşturan kişiyi otomatik ekler, room id'sini döner
   Future<String> createRoom({String gameType = 'pisti', int maxPlayers = 2}) async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _auth.currentUser;
     if (user == null) {
       throw Exception('Giriş yapılmamış, oda oluşturulamaz');
     }
 
-    final roomRef = _db.collection('rooms').doc(); // otomatik id üretir
+    final displayName = await UserPrefsService().getDisplayName() ??
+        'Oyuncu-${user.uid.substring(0, 5)}';
+
+    final roomRef = _db.collection('rooms').doc();
 
     await roomRef.set({
       'gameType': gameType,
@@ -20,7 +29,7 @@ class RoomService {
       'hostId': user.uid,
       'players': {
         user.uid: {
-          'displayName': 'Oyuncu-${user.uid.substring(0, 5)}',
+          'displayName': displayName,
           'isReady': false,
           'joinedAt': DateTime.now().toIso8601String(),
         }
@@ -33,16 +42,19 @@ class RoomService {
 
   /// Bir odaya katılır
   Future<void> joinRoom(String roomId) async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _auth.currentUser;
     if (user == null) {
       throw Exception('Giriş yapılmamış, odaya katılınamaz');
     }
+
+    final displayName = await UserPrefsService().getDisplayName() ??
+        'Oyuncu-${user.uid.substring(0, 5)}';
 
     final roomRef = _db.collection('rooms').doc(roomId);
 
     await roomRef.update({
       'players.${user.uid}': {
-        'displayName': 'Oyuncu-${user.uid.substring(0, 5)}',
+        'displayName': displayName,
         'isReady': false,
         'joinedAt': DateTime.now().toIso8601String(),
       }
@@ -53,6 +65,7 @@ class RoomService {
   Stream<DocumentSnapshot<Map<String, dynamic>>> watchRoom(String roomId) {
     return _db.collection('rooms').doc(roomId).snapshots();
   }
+
   /// Bekleyen (dolu olmayan) odaları gerçek zamanlı dinler
   Stream<List<Map<String, dynamic>>> watchOpenRooms() {
     return _db
@@ -70,11 +83,12 @@ class RoomService {
           .where((room) {
             final players = Map<String, dynamic>.from(room['players'] ?? {});
             final maxPlayers = room['maxPlayers'] ?? 2;
-            return players.length < maxPlayers; // dolu olmayan odalar
+            return players.length < maxPlayers;
           })
           .toList();
     });
   }
+
   /// Oda doluysa ve hâlâ "waiting" durumundaysa, oyunu "playing" durumuna geçirir.
   /// Transaction kullanır, birden fazla oyuncu aynı anda çağırsa bile güvenlidir.
   Future<void> startGameIfFull(String roomId) async {
@@ -94,8 +108,11 @@ class RoomService {
       }
     });
   }
+
+  /// Odadan ayrılır. Oda boş kalırsa siler, host ayrılırsa host'u devreder,
+  /// oyun zaten başlamışsa odayı "abandoned" olarak işaretler.
   Future<void> leaveRoom(String roomId) async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = _auth.currentUser;
     if (user == null) return;
 
     final roomRef = _db.collection('rooms').doc(roomId);
