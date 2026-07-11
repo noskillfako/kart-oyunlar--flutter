@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/playing_card.dart';
 import '../services/game_service.dart';
+import '../widgets/playing_card_widget.dart';
 
 class GameScreen extends StatefulWidget {
   final String roomId;
@@ -17,69 +18,6 @@ class _GameScreenState extends State<GameScreen> {
   final GameService _gameService = GameService();
   final String? _myUid = FirebaseAuth.instance.currentUser?.uid;
 
-  String _cardLabel(PlayingCard card) {
-    const rankLabels = {
-      Rank.two: '2', Rank.three: '3', Rank.four: '4', Rank.five: '5',
-      Rank.six: '6', Rank.seven: '7', Rank.eight: '8', Rank.nine: '9',
-      Rank.ten: '10', Rank.jack: 'V', Rank.queen: 'K', Rank.king: 'Ş', Rank.ace: 'A',
-    };
-    const suitSymbols = {
-      Suit.spades: '♠', Suit.hearts: '♥', Suit.diamonds: '♦', Suit.clubs: '♣',
-    };
-    return '${rankLabels[card.rank]}${suitSymbols[card.suit]}';
-  }
-
-  Color _cardColor(PlayingCard card) {
-    return (card.suit == Suit.hearts || card.suit == Suit.diamonds)
-        ? Colors.red
-        : Colors.black;
-  }
-
-  Widget _buildCard(PlayingCard card, {VoidCallback? onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 48,
-        height: 68,
-        margin: const EdgeInsets.symmetric(horizontal: 3),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Colors.black26),
-          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 2)],
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          _cardLabel(card),
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: _cardColor(card),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFaceDownCards(int count) {
-    return Wrap(
-      alignment: WrapAlignment.center,
-      children: List.generate(
-        count,
-        (i) => Container(
-          width: 40,
-          height: 56,
-          margin: const EdgeInsets.symmetric(horizontal: 3),
-          decoration: BoxDecoration(
-            color: Colors.blue[900],
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: Colors.white24),
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (_myUid == null) {
@@ -87,95 +25,284 @@ class _GameScreenState extends State<GameScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text('Pişti - Oda: ${widget.roomId}')),
-      backgroundColor: Colors.green[800],
-      body: SafeArea(
-        child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: _gameService.watchPublicState(widget.roomId),
-          builder: (context, publicSnap) {
-            if (!publicSnap.hasData || !publicSnap.data!.exists) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24.0),
-                  child: Text(
-                    'Oyun hazırlanıyor...',
-                    style: TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ),
-              );
-            }
-
-            final pub = publicSnap.data!.data()!;
-            final status = pub['status'] ?? 'playing';
-            final currentTurnPlayerId = pub['currentTurnPlayerId'] as String?;
-            final playerOrder = List<String>.from(pub['playerOrder'] ?? []);
-            final handCounts = Map<String, dynamic>.from(pub['handCounts'] ?? {});
-            final pistiCounts = Map<String, dynamic>.from(pub['pistiCounts'] ?? {});
-            final tableCardsRaw = List<Map<String, dynamic>>.from(pub['tableCards'] ?? []);
-            final tableCards = tableCardsRaw.map((c) => PlayingCard.fromMap(c)).toList();
-            final deckCount = pub['deckCount'] ?? 0;
-
-            final opponentId = playerOrder.firstWhere(
-              (id) => id != _myUid,
-              orElse: () => '',
-            );
-            final myTurn = currentTurnPlayerId == _myUid;
-
-            if (status == 'finished') {
-              return _buildFinishedPanel(pub, playerOrder);
-            }
-
-            return Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      Chip(label: Text('Rakip pişti: ${pistiCounts[opponentId] ?? 0}')),
-                      Chip(label: Text('Sen pişti: ${pistiCounts[_myUid] ?? 0}')),
-                      Chip(label: Text('Deste: $deckCount')),
-                    ],
-                  ),
-                ),
-                Text(
-                  myTurn ? 'Senin sıran' : 'Rakip oynuyor...',
-                  style: const TextStyle(color: Colors.white, fontSize: 16),
-                ),
-                const SizedBox(height: 12),
-                _buildFaceDownCards(
-                  (handCounts[opponentId] ?? 0) is int
-                      ? handCounts[opponentId] ?? 0
-                      : 0,
-                ),
-                const Spacer(),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  children: tableCards.map((c) => _buildCard(c)).toList(),
-                ),
-                const Spacer(),
-                StreamBuilder<List<PlayingCard>>(
-                  stream: _gameService.watchMyHand(widget.roomId),
-                  builder: (context, handSnap) {
-                    final myHand = handSnap.data ?? [];
-                    return Wrap(
-                      alignment: WrapAlignment.center,
-                      children: myHand.map((card) {
-                        return _buildCard(
-                          card,
-                          onTap: myTurn
-                              ? () => _gameService.playCard(widget.roomId, card)
-                              : null,
-                        );
-                      }).toList(),
-                    );
-                  },
-                ),
-                const SizedBox(height: 24),
-              ],
-            );
-          },
+      appBar: AppBar(
+        title: Text(
+          'Pişti - Oda: ${widget.roomId}',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
         ),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF0F3A1D),
+        foregroundColor: Colors.white,
+      ),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment.center,
+            radius: 1.2,
+            colors: [
+              Color(0xFF1E5B32),
+              Color(0xFF0D321A),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: _gameService.watchPublicState(widget.roomId),
+            builder: (context, publicSnap) {
+              if (!publicSnap.hasData || !publicSnap.data!.exists) {
+                return const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(color: Color(0xFFFFC107)),
+                        SizedBox(height: 16), // const kelimesi kaldırıldı
+                        Text(
+                          'Oyun hazırlanıyor...',
+                          style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final pub = publicSnap.data!.data()!;
+              final status = pub['status'] ?? 'playing';
+              final currentTurnPlayerId = pub['currentTurnPlayerId'] as String?;
+              final playerOrder = List<String>.from(pub['playerOrder'] ?? []);
+              final handCounts = Map<String, dynamic>.from(pub['handCounts'] ?? {});
+              final pistiCounts = Map<String, dynamic>.from(pub['pistiCounts'] ?? {});
+              final tableCardsRaw = List<Map<String, dynamic>>.from(pub['tableCards'] ?? []);
+              final tableCards = tableCardsRaw.map((c) => PlayingCard.fromMap(c)).toList();
+              final deckCount = pub['deckCount'] ?? 0;
+
+              final opponentId = playerOrder.firstWhere(
+                (id) => id != _myUid,
+                orElse: () => '',
+              );
+              final myTurn = currentTurnPlayerId == _myUid;
+
+              if (status == 'finished') {
+                return _buildFinishedPanel(pub, playerOrder);
+              }
+
+              return Column(
+                children: [
+                  // 1. Dashboard
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _infoChip('Sen', pistiCounts[_myUid] ?? 0, isMyTurn: myTurn),
+                        _deckChip(deckCount),
+                        _infoChip('Rakip', pistiCounts[opponentId] ?? 0, isMyTurn: !myTurn && status != 'finished'),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // 2. Rakip Kartları
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8.0),
+                    child: Wrap(
+                      spacing: -16,
+                      alignment: WrapAlignment.center,
+                      children: List.generate(
+                        (handCounts[opponentId] ?? 0) is int ? handCounts[opponentId] ?? 0 : 0,
+                        (i) => const CardBackWidget(width: 50, height: 72),
+                      ),
+                    ),
+                  ),
+
+                  // 3. Oyun Masası
+                  Expanded(
+                    child: Center(
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 20),
+                        padding: const EdgeInsets.all(16),
+                        width: double.infinity,
+                        height: double.infinity,
+                        constraints: const BoxConstraints(maxHeight: 220), // BoxConstraints ile düzeltildi
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(120),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            width: 2.0,
+                          ),
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            if (tableCards.isEmpty)
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.style_outlined, color: Colors.white.withValues(alpha: 0.2), size: 36),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Masa Boş',
+                                    style: TextStyle(
+                                      color: Colors.white.withValues(alpha: 0.25),
+                                      fontSize: 13,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            
+                            for (int i = 0; i < tableCards.length; i++)
+                              Positioned(
+                                left: (MediaQuery.of(context).size.width - 40 - 32 - 54) / 2 + (i - (tableCards.length - 1) / 2) * 12.0,
+                                child: Transform.rotate(
+                                  angle: (i == tableCards.length - 1) ? 0 : (i * 0.08 - 0.12),
+                                  child: PlayingCardWidget(
+                                    card: tableCards[i],
+                                    width: 54,
+                                    height: 76,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // 4. Durum Göstergesi
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: myTurn 
+                          ? const Color(0xFFFFB300).withValues(alpha: 0.15)
+                          : Colors.black.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: myTurn ? const Color(0xFFFFB300).withValues(alpha: 0.4) : Colors.white12,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          myTurn ? Icons.play_arrow_rounded : Icons.hourglass_empty_rounded,
+                          color: myTurn ? const Color(0xFFFFB300) : Colors.white60,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          myTurn ? 'Senin Sıran' : 'Rakip Düşünüyor...',
+                          style: TextStyle(
+                            color: myTurn ? const Color(0xFFFFB300) : Colors.white70,
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // 5. Kendi Kartlarım
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 20.0),
+                    child: StreamBuilder<List<PlayingCard>>(
+                      stream: _gameService.watchMyHand(widget.roomId),
+                      builder: (context, handSnap) {
+                        final myHand = handSnap.data ?? [];
+                        return Wrap(
+                          spacing: 10,
+                          alignment: WrapAlignment.center,
+                          children: myHand.map((card) {
+                            return PlayingCardWidget(
+                              card: card,
+                              width: 58,
+                              height: 82,
+                              raised: myTurn,
+                              onTap: myTurn
+                                  ? () => _gameService.playCard(widget.roomId, card)
+                                  : null,
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 12),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _infoChip(String label, int pistiCount, {required bool isMyTurn}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      width: 110,
+      decoration: BoxDecoration(
+        color: isMyTurn ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isMyTurn ? const Color(0xFFFFC107).withValues(alpha: 0.7) : Colors.white12,
+          width: isMyTurn ? 1.5 : 1.0,
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: isMyTurn ? Colors.white : Colors.white70,
+              fontSize: 11,
+              fontWeight: isMyTurn ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '$pistiCount Pişti',
+            style: const TextStyle(
+              color: Color(0xFFFFC107),
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _deckChip(int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        children: [
+          const Text(
+            'DESTE',
+            style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            '$count',
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 1),
+          const Text(
+            'Kalan',
+            style: TextStyle(color: Colors.white30, fontSize: 8),
+          ),
+        ],
       ),
     );
   }
@@ -187,28 +314,60 @@ class _GameScreenState extends State<GameScreen> {
     final opponentScore = scores[opponentId] ?? 0;
 
     final resultText = myScore > opponentScore
-        ? 'Kazandın! 🎉'
-        : (myScore == opponentScore ? 'Berabere!' : 'Kaybettin.');
+        ? 'Tebrikler, Kazandın! 🎉'
+        : (myScore == opponentScore ? 'Beraberlik!' : 'Kaybettin.');
 
     return Center(
-      child: Card(
+      child: Container(
         margin: const EdgeInsets.all(24),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(resultText, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Text('Senin puanın: $myScore'),
-              Text('Rakip puanı: $opponentScore'),
-              const SizedBox(height: 16),
-              ElevatedButton(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.85),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.5), width: 1.5),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              resultText,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    const Text('Senin Puanın', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Text('$myScore', style: const TextStyle(color: Color(0xFFFFC107), fontSize: 22, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                Column(
+                  children: [
+                    const Text('Rakip Puanı', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                    const SizedBox(height: 4),
+                    Text('$opponentScore', style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFC107),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
                 onPressed: () => Navigator.popUntil(context, (r) => r.isFirst),
-                child: const Text('Ana Ekrana Dön'),
+                child: const Text('Ana Ekrana Dön', style: TextStyle(fontWeight: FontWeight.bold)),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
