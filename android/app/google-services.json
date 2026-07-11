@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "320731247095",
+    "firebase_url": "https://iskambil-84d16-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "iskambil-84d16",
+    "storage_bucket": "iskambil-84d16.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:320731247095:android:d15c083f6d30c414b17ef2",
+        "android_client_info": {
+          "package_name": "com.example.kart_oyunu"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWAZj4whRvpdmu3rtiH3p1Mtd6mIVvgEQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
