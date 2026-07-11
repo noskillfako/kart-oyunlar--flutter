@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/room_service.dart';
+import '../theme/app_theme.dart';
 import 'game_screen.dart';
 
 class WaitingRoomScreen extends StatefulWidget {
@@ -34,70 +35,119 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text('Oda: ${widget.roomId}'),
+          title: Text('Oda: ${widget.roomId.substring(0, 6)}...'),
+          centerTitle: true,
+          backgroundColor: AppColors.darkGreen,
+          foregroundColor: Colors.white,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () async {
               await _leaveRoom();
-              if (mounted) Navigator.pop(context);
+              if (context.mounted) Navigator.pop(context);
             },
           ),
         ),
-        body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: _roomService.watchRoom(widget.roomId),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData || !snapshot.data!.exists) {
-              return const Center(child: CircularProgressIndicator());
-            }
+        body: CasinoBackground(
+          child: SafeArea(
+            child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: _roomService.watchRoom(widget.roomId),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData || !snapshot.data!.exists) {
+                  return const Center(
+                    child: CircularProgressIndicator(color: AppColors.gold),
+                  );
+                }
 
-            final data = snapshot.data!.data()!;
-            final players = Map<String, dynamic>.from(data['players'] ?? {});
-            final maxPlayers = data['maxPlayers'] ?? 2;
-            final status = data['status'] ?? 'waiting';
+                final data = snapshot.data!.data()!;
+                final players = Map<String, dynamic>.from(data['players'] ?? {});
+                final maxPlayers = data['maxPlayers'] ?? 2;
+                final status = data['status'] ?? 'waiting';
 
-            if (status == 'waiting' && players.length >= maxPlayers) {
-              _roomService.startGameIfFull(widget.roomId);
-            }
+                if (status == 'waiting' && players.length >= maxPlayers) {
+                  _roomService.startGameIfFull(widget.roomId);
+                }
 
-            if (status == 'playing' && !_navigated) {
-              _navigated = true;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => GameScreen(roomId: widget.roomId),
+                if (status == 'playing' && !_navigated) {
+                  _navigated = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => GameScreen(roomId: widget.roomId),
+                      ),
+                    );
+                  });
+                }
+
+                return Padding(
+                  padding: const EdgeInsets.all(24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 12),
+                      const Icon(Icons.hourglass_top_rounded, color: AppColors.goldDeep, size: 40),
+                      const SizedBox(height: 12),
+                      Text(
+                        '${players.length}/$maxPlayers oyuncu bekleniyor',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'OYUNCULAR',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.5),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 1.0,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ...players.entries.map((e) => Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.person, color: AppColors.gold, size: 16),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        e.value['displayName'] ?? 'Oyuncu',
+                                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                                      ),
+                                    ],
+                                  ),
+                                )),
+                          ],
+                        ),
+                      ),
+                      const Spacer(),
+                      GoldOutlineButton(
+                        label: 'Odadan Ayrıl',
+                        icon: Icons.exit_to_app,
+                        onPressed: () async {
+                          await _leaveRoom();
+                          if (context.mounted) Navigator.pop(context);
+                        },
+                      ),
+                    ],
                   ),
                 );
-              });
-            }
-
-            return Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Oyun: ${data['gameType']}'),
-                  Text('Durum: $status'),
-                  const SizedBox(height: 16),
-                  const Text('Oyuncular:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ...players.entries.map((e) => Text('- ${e.value['displayName']}')),
-                  const SizedBox(height: 16),
-                  Text('${players.length}/$maxPlayers oyuncu bekleniyor...'),
-                  const Spacer(),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton(
-                      onPressed: () async {
-                        await _leaveRoom();
-                        if (context.mounted) Navigator.pop(context);
-                      },
-                      child: const Text('Odadan Ayrıl'),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
+              },
+            ),
+          ),
         ),
       ),
     );
