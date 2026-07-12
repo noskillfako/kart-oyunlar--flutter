@@ -58,7 +58,6 @@ class DefaultFirebaseOptions {
     databaseURL: 'https://iskambil-84d16-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'iskambil-84d16.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCHizoZsHcGaQCwRZpm8EtJAY8s1Kfvork',
     appId: '1:320731247095:ios:0d2356bbd7a4345ab17ef2',
@@ -66,9 +65,10 @@ class DefaultFirebaseOptions {
     projectId: 'iskambil-84d16',
     databaseURL: 'https://iskambil-84d16-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'iskambil-84d16.firebasestorage.app',
+    androidClientId: '320731247095-7toj5sl9b0nm1g4anuhl6g2lg4mcsu7v.apps.googleusercontent.com',
+    iosClientId: '320731247095-tnfdd9h5q8vu5pgm153biq0nr8cugcju.apps.googleusercontent.com',
     iosBundleId: 'com.example.kartOyunu',
   );
-
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyCHizoZsHcGaQCwRZpm8EtJAY8s1Kfvork',
     appId: '1:320731247095:ios:0d2356bbd7a4345ab17ef2',
@@ -76,6 +76,8 @@ class DefaultFirebaseOptions {
     projectId: 'iskambil-84d16',
     databaseURL: 'https://iskambil-84d16-default-rtdb.europe-west1.firebasedatabase.app',
     storageBucket: 'iskambil-84d16.firebasestorage.app',
+    androidClientId: '320731247095-7toj5sl9b0nm1g4anuhl6g2lg4mcsu7v.apps.googleusercontent.com',
+    iosClientId: '320731247095-tnfdd9h5q8vu5pgm153biq0nr8cugcju.apps.googleusercontent.com',
     iosBundleId: 'com.example.kartOyunu',
   );
 
