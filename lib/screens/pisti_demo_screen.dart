@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/playing_card.dart';
@@ -5,7 +6,6 @@ import '../models/game_room.dart';
 import '../engine/pisti/pisti_engine.dart';
 import '../engine/pisti/pisti_state.dart';
 import '../widgets/playing_card_widget.dart';
-import 'dart:async';
 
 class PistiDemoScreen extends StatefulWidget {
   const PistiDemoScreen({super.key});
@@ -19,6 +19,8 @@ class _PistiDemoScreenState extends State<PistiDemoScreen> {
   late PistiGameState _state;
   Timer? _botTimer;
 
+  String? _playingCardId;
+
   static const String me = 'me';
   static const String bot = 'bot';
 
@@ -26,6 +28,12 @@ class _PistiDemoScreenState extends State<PistiDemoScreen> {
   void initState() {
     super.initState();
     _startNewGame();
+  }
+
+  @override
+  void dispose() {
+    _botTimer?.cancel();
+    super.dispose();
   }
 
   void _startNewGame() {
@@ -42,16 +50,24 @@ class _PistiDemoScreenState extends State<PistiDemoScreen> {
     );
     setState(() {
       _state = _engine.initializeGame(fakeRoom);
+      _playingCardId = null;
     });
     _maybeLetBotPlay();
   }
 
-  void _playCard(PlayingCard card) {
+  Future<void> _playCard(PlayingCard card) async {
     final move = PistiMove(card);
     if (!_engine.isValidMove(_state, me, move)) return;
+    if (_playingCardId != null) return;
+
+    setState(() => _playingCardId = card.id);
+
+    await Future.delayed(const Duration(milliseconds: 200));
+    if (!mounted) return;
 
     setState(() {
       _state = _engine.applyMove(_state, me, move);
+      _playingCardId = null;
     });
 
     _maybeLetBotPlay();
@@ -62,7 +78,7 @@ class _PistiDemoScreenState extends State<PistiDemoScreen> {
     if (_state.currentTurnPlayerId != bot) return;
 
     _botTimer?.cancel();
-    _botTimer = Timer(const Duration(milliseconds: 1000), () {
+    _botTimer = Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
       final hand = _state.hands[bot] ?? [];
       if (hand.isEmpty) return;
@@ -79,249 +95,127 @@ class _PistiDemoScreenState extends State<PistiDemoScreen> {
   }
 
   @override
-  void dispose() {
-    _botTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final isGameOver = _engine.isGameOver(_state);
     final myHand = _state.hands[me] ?? [];
     final myTurn = _state.currentTurnPlayerId == me && !isGameOver;
 
-    // Canlı skor hesaplama
-    final scores = _engine.calculateScores(_state);
-    final myScore = scores[me] ?? 0;
-    final botScore = scores[bot] ?? 0;
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Pişti (Demo - Bot ile)',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF0F3A1D),
-        foregroundColor: Colors.white,
+        title: const Text('Pişti (Demo - Bot ile)'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh_rounded),
+            icon: const Icon(Icons.refresh),
             onPressed: _startNewGame,
             tooltip: 'Yeni Oyun',
           ),
         ],
       ),
-      body: Container(
-        // Radyal yeşil oyun masası arka planı
-        decoration: const BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment.center,
-            radius: 1.2,
-            colors: [
-              Color(0xFF1E5B32), // Açık yeşil çuha merkez
-              Color(0xFF0D321A), // Koyu orman yeşili kenarlar
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              // 1. Üst Skor Paneli (Dashboard)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    _infoChip('Sen', _state.collectedCards[me]!.length, _state.pistiCounts[me]!, myScore, isMyTurn: myTurn),
-                    _deckChip(_state.deck.length),
-                    _infoChip('Bot', _state.collectedCards[bot]!.length, _state.pistiCounts[bot]!, botScore, isMyTurn: !myTurn && !isGameOver),
-                  ],
+      backgroundColor: const Color(0xFF1B5E20),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _infoChip('Sen', _state.collectedCards[me]!.length, _state.pistiCounts[me]!, isActive: myTurn),
+                  _deckChip(_state.deck.length),
+                  _infoChip('Bot', _state.collectedCards[bot]!.length, _state.pistiCounts[bot]!, isActive: !myTurn && !isGameOver),
+                ],
+              ),
+            ),
+
+            if (isGameOver) _buildGameOverPanel(),
+
+            if (!isGameOver)
+              Text(
+                myTurn ? 'Senin sıran' : 'Bot oynuyor...',
+                style: TextStyle(
+                  color: myTurn ? Colors.amberAccent : Colors.white70,
+                  fontSize: 16,
+                  fontWeight: myTurn ? FontWeight.bold : FontWeight.normal,
                 ),
               ),
 
-              const SizedBox(height: 10),
+            const SizedBox(height: 16),
 
-              // 2. Rakip (Bot) Kartları
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Wrap(
-                  spacing: -16, // Kartların eldeki gibi üst üste binmesi
-                  alignment: WrapAlignment.center,
-                  children: List.generate(
-                    (_state.hands[bot] ?? []).length,
-                    (i) => const CardBackWidget(width: 50, height: 72),
-                  ),
-                ),
+            Wrap(
+              alignment: WrapAlignment.center,
+              children: List.generate(
+                (_state.hands[bot] ?? []).length,
+                (i) => const CardBackWidget(),
               ),
+            ),
 
-              // 3. Orta Oyun Alanı (Masa)
-              Expanded(
-                child: Center(
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 20),
-                    padding: const EdgeInsets.all(16),
-                    width: double.infinity,
-                    height: double.infinity,
-                    constraints: const BoxConstraints(maxHeight: 220), // BoxConstraints ile düzeltildi
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(120), // Oval hatlı masa halkası
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.08),
-                        width: 2.0,
-                      ),
-                    ),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        if (_state.tableCards.isEmpty)
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.style_outlined, color: Colors.white.withValues(alpha: 0.2), size: 36),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Masa Boş',
-                                style: TextStyle(
-                                  color: Colors.white.withValues(alpha: 0.25),
-                                  fontSize: 13,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                            ],
-                          ),
-                        
-                        // Üst üste açılı duran masa kartları
-                        for (int i = 0; i < _state.tableCards.length; i++)
-                          Positioned(
-                            left: (MediaQuery.of(context).size.width - 40 - 32 - 54) / 2 + (i - (_state.tableCards.length - 1) / 2) * 12.0,
-                            child: Transform.rotate(
-                              angle: (i == _state.tableCards.length - 1) ? 0 : (i * 0.08 - 0.12),
-                              child: PlayingCardWidget(
-                                card: _state.tableCards[i],
-                                width: 54,
-                                height: 76,
-                              ),
-                            ),
-                          ),
-                      ],
+            const Spacer(),
+
+            Wrap(
+              alignment: WrapAlignment.center,
+              children: [
+                for (int i = 0; i < _state.tableCards.length; i++)
+                  Padding(
+                    key: ValueKey('${_state.tableCards[i].id}_$i'),
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: _AnimatedTableCard(
+                      child: PlayingCardWidget(card: _state.tableCards[i], width: 56, height: 80),
                     ),
                   ),
-                ),
-              ),
+              ],
+            ),
 
-              // Oyun Bittiğinde Çıkacak Panel
-              if (isGameOver)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                  child: _buildGameOverPanel(myScore, botScore),
-                )
-              else
-                // 4. Sıra Kimde Göstergesi
-                Container(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: myTurn 
-                        ? const Color(0xFFFFB300).withValues(alpha: 0.15)
-                        : Colors.black.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: myTurn ? const Color(0xFFFFB300).withValues(alpha: 0.4) : Colors.white12,
+            const Spacer(),
+
+            Wrap(
+              alignment: WrapAlignment.center,
+              children: myHand.map((card) {
+                final isPlaying = _playingCardId == card.id;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: AnimatedScale(
+                    scale: isPlaying ? 0.2 : 1.0,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeIn,
+                    child: AnimatedOpacity(
+                      opacity: isPlaying ? 0.0 : 1.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: PlayingCardWidget(
+                        card: card,
+                        raised: myTurn && !isPlaying,
+                        onTap: (myTurn && _playingCardId == null) ? () => _playCard(card) : null,
+                      ),
                     ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        myTurn ? Icons.play_arrow_rounded : Icons.hourglass_empty_rounded,
-                        color: myTurn ? const Color(0xFFFFB300) : Colors.white60,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        myTurn ? 'Senin Sıran' : 'Bot Düşünüyor...',
-                        style: TextStyle(
-                          color: myTurn ? const Color(0xFFFFB300) : Colors.white70,
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                );
+              }).toList(),
+            ),
 
-              // 5. Oyuncu Kartları (Alt Kısım)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20.0),
-                child: Wrap(
-                  spacing: 10,
-                  alignment: WrapAlignment.center,
-                  children: myHand.map((card) {
-                    return PlayingCardWidget(
-                      card: card,
-                      width: 58,
-                      height: 82,
-                      raised: myTurn,
-                      onTap: myTurn ? () => _playCard(card) : null,
-                    );
-                  }).toList(),
-                ),
-              ),
-              
-              const SizedBox(height: 12),
-            ],
-          ),
+            const SizedBox(height: 24),
+          ],
         ),
       ),
     );
   }
 
-  Widget _infoChip(String label, int cardCount, int pistiCount, int score, {required bool isMyTurn}) {
+  Widget _infoChip(String label, int cardCount, int pistiCount, {required bool isActive}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      width: 110,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: isMyTurn ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.3),
+        color: isActive ? Colors.white.withValues(alpha: 0.12) : Colors.black.withValues(alpha: 0.3),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isMyTurn ? const Color(0xFFFFC107).withValues(alpha: 0.7) : Colors.white12,
-          width: isMyTurn ? 1.5 : 1.0,
+          color: isActive ? const Color(0xFFFFC107).withValues(alpha: 0.7) : Colors.white12,
+          width: isActive ? 1.5 : 1.0,
         ),
-        boxShadow: isMyTurn ? [
-          BoxShadow(
-            color: const Color(0xFFFFC107).withValues(alpha: 0.1),
-            blurRadius: 6,
-            spreadRadius: 1,
-          )
-        ] : null,
       ),
       child: Column(
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: isMyTurn ? Colors.white : Colors.white70,
-              fontSize: 11,
-              fontWeight: isMyTurn ? FontWeight.bold : FontWeight.normal,
-            ),
-          ),
+          Text(label, style: TextStyle(color: isActive ? Colors.white : Colors.white70, fontSize: 11)),
           const SizedBox(height: 4),
           Text(
-            '$score Puan',
-            style: const TextStyle(
-              color: Color(0xFFFFC107),
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            '$cardCount k. | $pistiCount p.',
-            style: const TextStyle(
-              color: Colors.white54,
-              fontSize: 10,
-            ),
+            '$cardCount kart · $pistiCount pişti',
+            style: const TextStyle(color: Color(0xFFFFC107), fontSize: 12, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -338,88 +232,66 @@ class _PistiDemoScreenState extends State<PistiDemoScreen> {
       ),
       child: Column(
         children: [
-          const Text(
-            'DESTE',
-            style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w600),
-          ),
+          const Text('DESTE', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w600)),
           const SizedBox(height: 3),
-          Text(
-            '$count',
-            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 1),
-          const Text(
-            'Kalan',
-            style: TextStyle(color: Colors.white30, fontSize: 8),
-          ),
+          Text('$count', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
         ],
       ),
     );
   }
 
-  Widget _buildGameOverPanel(int myScore, int botScore) {
-    final winner = myScore > botScore
-        ? 'Tebrikler, Kazandın! 🎉'
-        : (myScore == botScore ? 'Beraberlik!' : 'Bot Kazandı.');
+  Widget _buildGameOverPanel() {
+    final scores = _engine.calculateScores(_state);
+    final myScore = scores[me] ?? 0;
+    final botScore = scores[bot] ?? 0;
+    final winner = myScore > botScore ? 'Sen kazandın! 🎉' : (myScore == botScore ? 'Berabere!' : 'Bot kazandı.');
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.75),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.5), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
-            blurRadius: 10,
-          )
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            winner,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Column(
-                children: [
-                  const Text('Senin Puanın', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  const SizedBox(height: 4),
-                  Text('$myScore', style: const TextStyle(color: Color(0xFFFFC107), fontSize: 20, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              Column(
-                children: [
-                  const Text('Botun Puanı', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  const SizedBox(height: 4),
-                  Text('$botScore', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            height: 38,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFFC107),
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                elevation: 2,
-              ),
+    return Card(
+      margin: const EdgeInsets.all(16),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            Text(winner, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Senin puanın: $myScore'),
+            Text('Bot puanı: $botScore'),
+            const SizedBox(height: 12),
+            ElevatedButton(
               onPressed: _startNewGame,
-              child: const Text('Yeniden Oyna', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              child: const Text('Yeni Oyun'),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+}
+
+/// Masaya yeni giren bir kartın yukarıdan kayarak, büyüyerek ve belirerek
+/// "yerine oturmasını" sağlayan giriş animasyonu.
+class _AnimatedTableCard extends StatelessWidget {
+  final Widget child;
+
+  const _AnimatedTableCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) {
+        final clamped = value.clamp(0.0, 1.0);
+        return Transform.translate(
+          offset: Offset(0, (1 - value) * 24),
+          child: Transform.scale(
+            scale: value,
+            child: Opacity(opacity: clamped, child: child),
+          ),
+        );
+      },
+      child: child,
     );
   }
 }

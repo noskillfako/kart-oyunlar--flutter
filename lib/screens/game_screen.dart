@@ -18,6 +18,20 @@ class _GameScreenState extends State<GameScreen> {
   final GameService _gameService = GameService();
   final String? _myUid = FirebaseAuth.instance.currentUser?.uid;
 
+  // Şu an "oynanıyor" animasyonu gösterilen kartın id'si (sunucu onayı beklenirken)
+  String? _playedCardId;
+
+  Future<void> _onPlayCard(PlayingCard card) async {
+    if (_playedCardId != null) return; // aynı anda birden fazla hamleyi önle
+    setState(() => _playedCardId = card.id);
+
+    await _gameService.playCard(widget.roomId, card);
+
+    // Animasyonun görsel olarak tamamlanmasına kısa süre izin ver
+    await Future.delayed(const Duration(milliseconds: 220));
+    if (mounted) setState(() => _playedCardId = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_myUid == null) {
@@ -57,7 +71,7 @@ class _GameScreenState extends State<GameScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         CircularProgressIndicator(color: Color(0xFFFFC107)),
-                        SizedBox(height: 16), // const kelimesi kaldırıldı
+                        SizedBox(height: 16),
                         Text(
                           'Oyun hazırlanıyor...',
                           style: TextStyle(color: Colors.white70, fontSize: 16, fontWeight: FontWeight.w500),
@@ -126,7 +140,7 @@ class _GameScreenState extends State<GameScreen> {
                         padding: const EdgeInsets.all(16),
                         width: double.infinity,
                         height: double.infinity,
-                        constraints: const BoxConstraints(maxHeight: 220), // BoxConstraints ile düzeltildi
+                        constraints: const BoxConstraints(maxHeight: 220),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(120),
@@ -154,16 +168,19 @@ class _GameScreenState extends State<GameScreen> {
                                   ),
                                 ],
                               ),
-                            
+
                             for (int i = 0; i < tableCards.length; i++)
                               Positioned(
+                                key: ValueKey('${tableCards[i].id}_$i'),
                                 left: (MediaQuery.of(context).size.width - 40 - 32 - 54) / 2 + (i - (tableCards.length - 1) / 2) * 12.0,
                                 child: Transform.rotate(
                                   angle: (i == tableCards.length - 1) ? 0 : (i * 0.08 - 0.12),
-                                  child: PlayingCardWidget(
-                                    card: tableCards[i],
-                                    width: 54,
-                                    height: 76,
+                                  child: _AnimatedTableCard(
+                                    child: PlayingCardWidget(
+                                      card: tableCards[i],
+                                      width: 54,
+                                      height: 76,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -177,7 +194,7 @@ class _GameScreenState extends State<GameScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
                     decoration: BoxDecoration(
-                      color: myTurn 
+                      color: myTurn
                           ? const Color(0xFFFFB300).withValues(alpha: 0.15)
                           : Colors.black.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
@@ -217,21 +234,31 @@ class _GameScreenState extends State<GameScreen> {
                           spacing: 10,
                           alignment: WrapAlignment.center,
                           children: myHand.map((card) {
-                            return PlayingCardWidget(
-                              card: card,
-                              width: 58,
-                              height: 82,
-                              raised: myTurn,
-                              onTap: myTurn
-                                  ? () => _gameService.playCard(widget.roomId, card)
-                                  : null,
+                            final isPlaying = _playedCardId == card.id;
+                            return AnimatedScale(
+                              scale: isPlaying ? 0.2 : 1.0,
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeIn,
+                              child: AnimatedOpacity(
+                                opacity: isPlaying ? 0.0 : 1.0,
+                                duration: const Duration(milliseconds: 220),
+                                child: PlayingCardWidget(
+                                  card: card,
+                                  width: 58,
+                                  height: 82,
+                                  raised: myTurn && !isPlaying,
+                                  onTap: (myTurn && _playedCardId == null)
+                                      ? () => _onPlayCard(card)
+                                      : null,
+                                ),
+                              ),
                             );
                           }).toList(),
                         );
                       },
                     ),
                   ),
-                  
+
                   const SizedBox(height: 12),
                 ],
               );
@@ -322,9 +349,9 @@ class _GameScreenState extends State<GameScreen> {
         margin: const EdgeInsets.all(24),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.85),
+          color: Colors.black.withValues(alpha: 0.85),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFFFD700).withOpacity(0.5), width: 1.5),
+          border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.5), width: 1.5),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -370,6 +397,34 @@ class _GameScreenState extends State<GameScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Masaya yeni giren bir kartın yukarıdan kayarak, büyüyerek ve belirerek
+/// "yerine oturmasını" sağlayan giriş animasyonu.
+class _AnimatedTableCard extends StatelessWidget {
+  final Widget child;
+
+  const _AnimatedTableCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) {
+        final clamped = value.clamp(0.0, 1.0);
+        return Transform.translate(
+          offset: Offset(0, (1 - value) * 24),
+          child: Transform.scale(
+            scale: value,
+            child: Opacity(opacity: clamped, child: child),
+          ),
+        );
+      },
+      child: child,
     );
   }
 }
