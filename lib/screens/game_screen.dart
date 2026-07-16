@@ -18,16 +18,14 @@ class _GameScreenState extends State<GameScreen> {
   final GameService _gameService = GameService();
   final String? _myUid = FirebaseAuth.instance.currentUser?.uid;
 
-  // Şu an "oynanıyor" animasyonu gösterilen kartın id'si (sunucu onayı beklenirken)
   String? _playedCardId;
 
   Future<void> _onPlayCard(PlayingCard card) async {
-    if (_playedCardId != null) return; // aynı anda birden fazla hamleyi önle
+    if (_playedCardId != null) return;
     setState(() => _playedCardId = card.id);
 
     await _gameService.playCard(widget.roomId, card);
 
-    // Animasyonun görsel olarak tamamlanmasına kısa süre izin ver
     await Future.delayed(const Duration(milliseconds: 220));
     if (mounted) setState(() => _playedCardId = null);
   }
@@ -97,6 +95,10 @@ class _GameScreenState extends State<GameScreen> {
                 orElse: () => '',
               );
               final myTurn = currentTurnPlayerId == _myUid;
+
+              if (status == 'abandoned') {
+                return _buildAbandonedPanel();
+              }
 
               if (status == 'finished') {
                 return _buildFinishedPanel(pub, playerOrder);
@@ -330,6 +332,49 @@ class _GameScreenState extends State<GameScreen> {
             style: TextStyle(color: Colors.white30, fontSize: 8),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAbandonedPanel() {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.5), width: 1.5),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.person_off_rounded, color: Colors.redAccent, size: 40),
+            const SizedBox(height: 12),
+            const Text(
+              'Rakip oyunu terk etti',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Oyun sonlandırıldı.',
+              style: TextStyle(fontSize: 13, color: Colors.white.withValues(alpha: 0.6)),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFFFC107),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => Navigator.popUntil(context, (r) => r.isFirst),
+                child: const Text('Ana Ekrana Dön', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

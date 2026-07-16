@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/room_service.dart';
 import '../theme/app_theme.dart';
 import 'game_screen.dart';
+import 'batak_game_screen.dart';
 
 class WaitingRoomScreen extends StatefulWidget {
   final String roomId;
@@ -70,16 +71,26 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
 
                 if (status == 'playing' && !_navigated) {
                   _navigated = true;
+                  final gameType = data['gameType'] ?? 'pisti';
+                  final playerNames = <String, String>{
+                    for (final entry in players.entries)
+                      entry.key: (entry.value['displayName'] ?? 'Oyuncu') as String,
+                  };
+
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => GameScreen(roomId: widget.roomId),
+                        builder: (_) => gameType == 'batak'
+                            ? BatakGameScreen(
+                                roomId: widget.roomId,
+                                playerNames: playerNames,
+                              )
+                            : GameScreen(roomId: widget.roomId),
                       ),
                     );
                   });
                 }
-
                 final gameType = data['gameType'] ?? 'pisti';
                 final gameInfo = _gameInfo(gameType);
 
