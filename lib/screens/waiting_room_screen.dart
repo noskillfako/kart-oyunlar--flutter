@@ -30,8 +30,9 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
+        final nav = Navigator.of(context);
         await _leaveRoom();
-        if (mounted) Navigator.pop(context);
+        if (mounted) nav.pop();
       },
       child: Scaffold(
         appBar: AppBar(
@@ -79,14 +80,53 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                   });
                 }
 
+                final gameType = data['gameType'] ?? 'pisti';
+                final gameInfo = _gameInfo(gameType);
+
                 return Padding(
                   padding: const EdgeInsets.all(24.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       const SizedBox(height: 12),
-                      const Icon(Icons.hourglass_top_rounded, color: AppColors.goldDeep, size: 40),
-                      const SizedBox(height: 12),
+                      // Oyun türü rozeti
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              color:
+                                  gameInfo.color.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: gameInfo.color.withValues(alpha: 0.4),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(gameInfo.icon,
+                                    color: gameInfo.color, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  gameInfo.label,
+                                  style: TextStyle(
+                                    color: gameInfo.color,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      const Icon(Icons.hourglass_top_rounded,
+                          color: AppColors.goldDeep, size: 36),
+                      const SizedBox(height: 10),
                       Text(
                         '${players.length}/$maxPlayers oyuncu bekleniyor',
                         textAlign: TextAlign.center,
@@ -151,5 +191,23 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
         ),
       ),
     );
+  }
+}
+
+// ─── Yardımcı: oyun türü bilgisi ────────────────────────────────────────────
+class _GameInfo {
+  final String label;
+  final IconData icon;
+  final Color color;
+  const _GameInfo(this.label, this.icon, this.color);
+}
+
+_GameInfo _gameInfo(String gameType) {
+  switch (gameType) {
+    case 'batak':
+      return const _GameInfo('Batak', Icons.casino_rounded, Color(0xFF9C7FD0));
+    case 'pisti':
+    default:
+      return const _GameInfo('Pişti', Icons.style_rounded, Color(0xFFFFC107));
   }
 }

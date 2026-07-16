@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'lobby_screen.dart';
-import 'pisti_demo_screen.dart';
+import 'game_demo_screen.dart';
 import 'set_name_screen.dart';
 import '../services/user_prefs_service.dart';
 import '../services/auth_service.dart';
@@ -204,12 +204,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 14),
                   GoldOutlineButton(
-                    label: 'Pişti Motorunu Test Et (Demo)',
+                    label: 'Demo Oyun (Bot ile)',
                     icon: Icons.smart_toy_outlined,
                     onPressed: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const PistiDemoScreen()),
+                        MaterialPageRoute(builder: (_) => const GameDemoScreen()),
                       );
                     },
                   ),

@@ -66,14 +66,19 @@ class RoomService {
     return _db.collection('rooms').doc(roomId).snapshots();
   }
 
-  /// Bekleyen (dolu olmayan) odaları gerçek zamanlı dinler
-  Stream<List<Map<String, dynamic>>> watchOpenRooms() {
-    return _db
+  /// Bekleyen (dolu olmayan) odaları gerçek zamanlı dinler.
+  /// [gameType] verilirse yalnızca o oyun türündeki odalar döner.
+  Stream<List<Map<String, dynamic>>> watchOpenRooms({String? gameType}) {
+    Query<Map<String, dynamic>> query = _db
         .collection('rooms')
         .where('status', isEqualTo: 'waiting')
-        .orderBy('createdAt', descending: true)
-        .snapshots()
-        .map((snapshot) {
+        .orderBy('createdAt', descending: true);
+
+    if (gameType != null) {
+      query = query.where('gameType', isEqualTo: gameType);
+    }
+
+    return query.snapshots().map((snapshot) {
       return snapshot.docs
           .map((doc) {
             final data = doc.data();
