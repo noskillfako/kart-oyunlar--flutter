@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -5,6 +6,7 @@ import '../models/playing_card.dart';
 import '../services/batak_game_service.dart';
 import '../widgets/playing_card_widget.dart';
 import '../theme/app_theme.dart';
+import '../engine/batak/batak_engine.dart';
 
 class _TrickEntry {
   final String playerId;
@@ -31,7 +33,12 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
   final String? _myUid = FirebaseAuth.instance.currentUser?.uid;
 
   String? _playingCardId;
-  int _myBid = 7;
+  int _myBid = BatakEngine.minBid;
+
+  // Tamamlanan bir eli kısa süre görünür tutup sonra otomatik gizlemek için
+  int _prevTrickLength = 0;
+  bool _trickJustCompleted = false;
+  Timer? _trickClearTimer;
 
   String _nameOf(String uid) => widget.playerNames[uid] ?? 'Oyuncu';
 
@@ -46,6 +53,26 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
       case Suit.clubs:
         return 'Sinek';
     }
+  }
+
+  @override
+  void dispose() {
+    _trickClearTimer?.cancel();
+    super.dispose();
+  }
+
+  void _trackTrickCompletion(int currentTrickLength) {
+    if (currentTrickLength == 4 && _prevTrickLength != 4) {
+      _trickJustCompleted = true;
+      _trickClearTimer?.cancel();
+      _trickClearTimer = Timer(const Duration(milliseconds: 1200), () {
+        if (mounted) setState(() => _trickJustCompleted = false);
+      });
+    }
+    if (currentTrickLength != 4) {
+      _trickJustCompleted = false;
+    }
+    _prevTrickLength = currentTrickLength;
   }
 
   Future<void> _playCard(PlayingCard card) async {
@@ -99,6 +126,10 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
           final currentTrick = currentTrickRaw
               .map((t) => _TrickEntry(t['playerId'], PlayingCard.fromMap(t['card'])))
               .toList();
+
+          // Trick tamamlanma durumunu takip et (state değişikliği build sırasında,
+          // sadece Timer'ın kendisi setState tetikler)
+          _trackTrickCompletion(currentTrick.length);
 
           if (status == 'abandoned') {
             return Center(child: _buildAbandonedPanel());
@@ -247,8 +278,8 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     final iAmHighestBidder = highestBidderId == _myUid;
     final canAct = isMyTurn && !passed;
 
-    const minBid = 5;
-    const maxBid = 13;
+    final minBid = BatakEngine.minBid;
+    final maxBid = BatakEngine.maxBid;
     final sliderMin = (highestBid + 1).clamp(minBid, maxBid).toDouble();
     final sliderMax = maxBid.toDouble();
     final sliderValue = _myBid.toDouble().clamp(sliderMin, sliderMax);
@@ -434,6 +465,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     List<String> playerOrder,
   ) {
     final myTurn = currentTurnPlayerId == _myUid;
+    final waitingToStartNewTrick = myTurn && currentTrick.length == 4;
 
     final myIndex = playerOrder.indexOf(_myUid!);
     final rotated = List<String>.generate(
@@ -445,9 +477,13 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     final northId = rotated.length > 2 ? rotated[2] : null;
     final eastId = rotated.length > 3 ? rotated[3] : null;
 
+    final trickToShow = (currentTrick.length == 4 && !_trickJustCompleted)
+        ? const <_TrickEntry>[]
+        : currentTrick;
+
     PlayingCard? cardOf(String? uid) {
       if (uid == null) return null;
-      final entry = currentTrick.where((t) => t.playerId == uid);
+      final entry = trickToShow.where((t) => t.playerId == uid);
       return entry.isNotEmpty ? entry.first.card : null;
     }
 
@@ -471,11 +507,14 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
             ],
           ),
         ),
-        _buildTable(southId, westId, northId, eastId, cardOf, trumpSuit, currentTrick.isEmpty),
-        _turnBanner(
-          myTurn ? 'Senin sıran' : '${_nameOf(currentTurnPlayerId ?? '')} oynuyor...',
-          myTurn,
-        ),
+        _buildTable(southId, westId, northId, eastId, cardOf, trumpSuit, trickToShow.isEmpty),
+        if (waitingToStartNewTrick)
+          _turnBanner('Eli aldın! Yeni eli başlatmak için bir kart oyna', true)
+        else
+          _turnBanner(
+            myTurn ? 'Senin sıran' : '${_nameOf(currentTurnPlayerId ?? '')} oynuyor...',
+            myTurn,
+          ),
         Expanded(child: _myHand2Rows(myHand, myTurn, currentTrick)),
         const SizedBox(height: 6),
       ],
@@ -605,7 +644,9 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     final mid = (sorted.length / 2).ceil();
     final topRow = sorted.sublist(0, mid);
     final botRow = sorted.sublist(mid);
-    final ledSuit = currentTrick.isNotEmpty ? currentTrick.first.card.suit : null;
+    final ledSuit = (currentTrick.isNotEmpty && currentTrick.length < 4)
+        ? currentTrick.first.card.suit
+        : null;
     final hasLedSuitInHand = ledSuit != null && hand.any((c) => c.suit == ledSuit);
 
     return Padding(

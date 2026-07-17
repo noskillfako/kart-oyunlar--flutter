@@ -140,7 +140,7 @@ class PistiEngine implements GameEngine<PistiGameState, PistiMove> {
     }
 
     String? mostCardsPlayer;
-    var mostCards = -1;
+    var mostCards = 0; // 0'dan büyük olmalı — sıfır kartla bonus yok
     for (final id in state.playerOrder) {
       final count = state.collectedCards[id]!.length;
       if (count > mostCards) {
@@ -153,7 +153,7 @@ class PistiEngine implements GameEngine<PistiGameState, PistiMove> {
     }
 
     String? mostClubsPlayer;
-    var mostClubs = -1;
+    var mostClubs = 0; // 0'dan büyük olmalı — sıfır sineğle bonus yok
     for (final id in state.playerOrder) {
       final count = state.collectedCards[id]!.where((c) => c.suit == Suit.clubs).length;
       if (count > mostClubs) {

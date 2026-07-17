@@ -74,7 +74,7 @@ void main() {
       expect(state.declarerId, 'p2');
     });
 
-    test('herkes pas geçerse dealer minimum bid ile elci olur', () {
+    test('herkes pas geçerse dealer solundaki ilk oyuncuya zorunlu 6 kontrat kalır', () {
       var state = engine.initializeGame(testRoom);
       state = engine.applyMove(state, 'p2', const BatakMove.pass());
       state = engine.applyMove(state, 'p3', const BatakMove.pass());
@@ -82,8 +82,8 @@ void main() {
       state = engine.applyMove(state, 'p1', const BatakMove.pass());
 
       expect(state.phase, BatakPhase.chooseTrump);
-      expect(state.declarerId, 'p1'); // dealer
-      expect(state.highestBid, 5);
+      expect(state.declarerId, 'p2'); // dealer (p1) değil, dealer'ın solundaki ilk soru sorulan
+      expect(state.highestBid, BatakEngine.forcedBid); // 6
     });
   });
 
@@ -138,7 +138,7 @@ void main() {
       expect(engine.isValidMove(state, 'p2', move), true);
     });
 
-    test('trick tamamlanınca en yüksek koz kazanır', () {
+   test('trick tamamlanınca en yüksek koz kazanır, kart masada kalır', () {
       final state = BatakGameState(
         hands: {'p1': [], 'p2': [], 'p3': [], 'p4': []},
         playerOrder: ['p1', 'p2', 'p3', 'p4'],
@@ -167,7 +167,38 @@ void main() {
 
       expect(result.tricksWon['p3'], 1); // koz oynayan p3 kazandı
       expect(result.currentTurnPlayerId, 'p3');
-      expect(result.currentTrick, isEmpty);
+      // Yeni davranış: trick hemen temizlenmiyor, UI son eli gösterebilsin diye
+      // 4 kart olarak masada kalıyor, bir sonraki kart oynanınca temizlenir
+      expect(result.currentTrick.length, 4);
+    });
+
+    test('yeni bir kart oynanınca önceki trick temizlenir', () {
+      final completedTrickState = BatakGameState(
+        hands: {
+          'p1': [], 'p2': [], 'p3': [const PlayingCard(Suit.spades, Rank.king)], 'p4': [],
+        },
+        playerOrder: ['p1', 'p2', 'p3', 'p4'],
+        dealerId: 'p1',
+        phase: BatakPhase.playing,
+        bids: {}, passedPlayers: {},
+        currentTurnPlayerId: 'p3', // trick'i p3 kazanmıştı
+        trumpSuit: Suit.spades,
+        declarerId: 'p1',
+        currentTrick: [
+          const TrickCard('p1', PlayingCard(Suit.hearts, Rank.king)),
+          const TrickCard('p2', PlayingCard(Suit.hearts, Rank.ace)),
+          const TrickCard('p3', PlayingCard(Suit.spades, Rank.two)),
+          const TrickCard('p4', PlayingCard(Suit.clubs, Rank.two)),
+        ],
+        tricksWon: {'p1': 0, 'p2': 0, 'p3': 1, 'p4': 0},
+      );
+
+      final move = const BatakMove.playCard(PlayingCard(Suit.spades, Rank.king));
+      final result = engine.applyMove(completedTrickState, 'p3', move);
+
+      // Eski trick temizlenmiş, sadece yeni oynanan kart var
+      expect(result.currentTrick.length, 1);
+      expect(result.currentTrick.first.card, const PlayingCard(Suit.spades, Rank.king));
     });
 
     test('koz yoksa açılan renkte en yüksek kart kazanır', () {

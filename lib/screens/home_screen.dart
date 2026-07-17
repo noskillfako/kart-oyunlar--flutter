@@ -5,7 +5,6 @@ import 'game_demo_screen.dart';
 import 'set_name_screen.dart';
 import '../services/user_prefs_service.dart';
 import '../services/auth_service.dart';
-import '../theme/app_theme.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,16 +13,35 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final _prefsService = UserPrefsService();
   final _authService = AuthService();
   String? _displayName;
-  bool _linkingInProgress = false;
+  bool _linkingInProgress = false; // ignore: prefer_final_fields
+
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   @override
   void initState() {
     super.initState();
     _loadName();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.05).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadName() async {
@@ -33,7 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _goToLobby() async {
     final hasName = await _prefsService.hasDisplayName();
-
     if (!hasName) {
       if (!mounted) return;
       Navigator.push(
@@ -45,7 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _loadName();
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) =>  LobbyScreen()),
+                MaterialPageRoute(builder: (_) => const LobbyScreen()),
               );
             },
           ),
@@ -55,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) =>  LobbyScreen()),
+        MaterialPageRoute(builder: (_) => const LobbyScreen()),
       );
     }
   }
@@ -70,9 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _linkGoogle() async {
     setState(() => _linkingInProgress = true);
-
     final result = await _authService.linkWithGoogle();
-
     if (!mounted) return;
     setState(() => _linkingInProgress = false);
 
@@ -80,7 +95,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Google hesabına başarıyla bağlandı!')),
       );
-      setState(() {}); // Google bağlantı durumunu yeniden çiz
+      setState(() {});
     } else if (!result.isCancelled) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(result.errorMessage ?? 'Bir hata oluştu')),
@@ -90,128 +105,166 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'Giriş yapılamadı';
-    final isLinked = _authService.isLinkedWithGoogle;
-
     return Scaffold(
-      body: CasinoBackground(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment.center,
+            radius: 1.3,
+            colors: [
+              Color(0xFF1B3B1E), // Açık çuha yeşili
+              Color(0xFF0E2410), // Hafif gölgeli kenar
+            ],
+          ),
+        ),
         child: SafeArea(
           child: Center(
             child: Padding(
-              padding: const EdgeInsets.all(24.0),
+              padding: const EdgeInsets.symmetric(horizontal: 30),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.style_rounded, color: AppColors.goldDeep, size: 56),
-                  const SizedBox(height: 16),
+                  const Icon(Icons.style_rounded,
+                      color: Color(0xFFD4A24E), size: 52),
+                  const SizedBox(height: 12),
                   const Text(
-                    'Kart Oyunları',
+                    'İskambil', // <-- Sadece İskambil olarak değiştirildi
                     style: TextStyle(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
-                      letterSpacing: 0.5,
+                      shadows: [
+                        Shadow(color: Colors.black45, blurRadius: 12)
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Online Multiplayer Pişti',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.white.withValues(alpha: 0.6),
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  if (_displayName != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: AppColors.gold.withValues(alpha: 0.4)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.person, color: AppColors.gold, size: 16),
-                          const SizedBox(width: 6),
-                          Text(
-                            _displayName!,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          GestureDetector(
-                            onTap: _editName,
-                            child: const Icon(Icons.edit, size: 14, color: Colors.white54),
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 10),
+                  // Alt slogan tamamen kaldırıldı
+                  const SizedBox(height: 40),
 
-                  // Google hesabı bağlama durumu
-                  if (isLinked)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.4)),
+                  // OYNA butonu (koyu bordo) - Genişliği kısaltıldı
+                  _buildPulseButton(
+                    emoji: '🃏',
+                    label: 'Oyna',
+                    subtitle: 'Online / Lobi',
+                    colors: const [Color(0xFF5C1A2A), Color(0xFF8B2A3A)],
+                    borderColor: const Color(0xFFD88A96),
+                    glowColor: const Color(0xFFD88A96),
+                    onPressed: _goToLobby,
+                  ),
+                  const SizedBox(height: 16),
+
+                  // DEMO butonu (koyu petrol) - Genişliği kısaltıldı
+                  _buildPulseButton(
+                    emoji: '🤖',
+                    label: 'Demo Oyun',
+                    subtitle: 'Bot ile oyna',
+                    colors: const [Color(0xFF0A3B3C), Color(0xFF1A5A5C)],
+                    borderColor: const Color(0xFF7DD8DC),
+                    glowColor: const Color(0xFF7DD8DC),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const GameDemoScreen()),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // İleride eklenecek Ayarlar / Kredi butonları için boşluk
+                  // Örnek:
+                  // _buildTextButton('Ayarlar', Icons.settings, () {}),
+                  // const SizedBox(height: 8),
+                  // _buildTextButton('Krediler', Icons.info_outline, () {}),
+
+                  // İsim çubuğu (yeni temaya uyumlu)
+                  if (_displayName != null)
+                    GestureDetector(
+                      onTap: _editName,
+                      child: AnimatedBuilder(
+                        animation: _pulseAnimation,
+                        builder: (context, child) {
+                          final glowOpacity = 0.2 + (_pulseAnimation.value - 1.0) * 3;
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.15),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFD4A24E).withValues(alpha: glowOpacity),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.person,
+                                    color: Color(0xFFD4A24E), size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  _displayName!,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(width: 4),
+                                const Icon(Icons.edit,
+                                    size: 14, color: Colors.white54),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.check_circle, color: Colors.greenAccent, size: 14),
-                          const SizedBox(width: 6),
-                          Text(
-                            _authService.googleEmail ?? 'Google hesabına bağlı',
-                            style: const TextStyle(color: Colors.greenAccent, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
+                    ),
+                  const SizedBox(height: 8),
+
+                  // Google bağlantı
+                  if (!_authService.isLinkedWithGoogle)
                     TextButton.icon(
                       onPressed: _linkingInProgress ? null : _linkGoogle,
                       icon: _linkingInProgress
                           ? const SizedBox(
                               width: 14,
                               height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: Colors.white70),
                             )
-                          : const Icon(Icons.link, size: 16, color: Colors.white70),
+                          : const Icon(Icons.link,
+                              size: 16, color: Colors.white70),
                       label: Text(
-                        _linkingInProgress ? 'Bağlanıyor...' : 'Google ile hesabını kalıcı yap',
-                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        _linkingInProgress
+                            ? 'Bağlanıyor...'
+                            : 'Hesabı kalıcı yap',
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 12),
                       ),
+                    )
+                  else
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.check_circle,
+                            color: Colors.greenAccent, size: 14),
+                        SizedBox(width: 6),
+                        Text('Google hesabına bağlı',
+                            style: TextStyle(
+                                color: Colors.greenAccent, fontSize: 12)),
+                      ],
                     ),
-
                   const SizedBox(height: 6),
                   Text(
-                    'UID: $uid',
-                    style: TextStyle(fontSize: 9, color: Colors.white.withValues(alpha: 0.3)),
-                  ),
-                  const SizedBox(height: 32),
-                  GoldButton(
-                    label: 'Oyna',
-                    icon: Icons.play_arrow_rounded,
-                    onPressed: _goToLobby,
-                  ),
-                  const SizedBox(height: 14),
-                  GoldOutlineButton(
-                    label: 'Demo Oyun (Bot ile)',
-                    icon: Icons.smart_toy_outlined,
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const GameDemoScreen()),
-                      );
-                    },
+                    'UID: ${FirebaseAuth.instance.currentUser?.uid ?? ""}',
+                    style: TextStyle(
+                        fontSize: 9,
+                        color: Colors.white.withValues(alpha: 0.15)),
                   ),
                 ],
               ),
@@ -221,4 +274,98 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  // Buton genişliğini kısalttık (max 300 px) ve ortalamak için Center eklendi
+  Widget _buildPulseButton({
+    required String emoji,
+    required String label,
+    required String subtitle,
+    required List<Color> colors,
+    required Color borderColor,
+    required Color glowColor,
+    required VoidCallback onPressed,
+  }) {
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        final scale = _pulseAnimation.value;
+        final glowOpacity = 0.25 + (scale - 1.0) * 4;
+
+        return Transform.scale(
+          scale: scale,
+          child: Center( // Ortalamak için Center eklendi
+            child: GestureDetector(
+              onTap: onPressed,
+              child: Container(
+                width: 300, // <-- Sabit genişlik, enlemesine kısaltıldı
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  gradient: LinearGradient(
+                    colors: colors,
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                  border: Border.all(color: borderColor, width: 2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: glowColor.withValues(alpha: glowOpacity),
+                      blurRadius: 16,
+                      spreadRadius: 2,
+                    ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.3),
+                      blurRadius: 4,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(emoji, style: const TextStyle(fontSize: 28)),
+                    const SizedBox(width: 14),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.white.withValues(alpha: 0.8),
+                            fontWeight: FontWeight.normal,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+  
+  // İleride Ayarlar/Kredi için kullanabileceğin basit buton şablonu
+  /*
+  Widget _buildTextButton(String text, IconData icon, VoidCallback onTap) {
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, color: Colors.white70),
+      label: Text(text, style: const TextStyle(color: Colors.white70)),
+    );
+  }
+  */
 }

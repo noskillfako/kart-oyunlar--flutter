@@ -9,6 +9,7 @@ import '../engine/batak/batak_engine.dart';
 import '../engine/batak/batak_state.dart';
 import '../engine/batak/batak_move.dart';
 import '../widgets/playing_card_widget.dart';
+import '../widgets/collect_animation_overlay.dart';
 import '../theme/app_theme.dart';
 
 // ─── Oyun Modu Seçici ─────────────────────────────────────────────────────────
@@ -20,7 +21,7 @@ class GameDemoScreen extends StatefulWidget {
 }
 
 class _GameDemoScreenState extends State<GameDemoScreen> {
-  String _selectedGame = 'pisti'; // 'pisti' | 'batak'
+  String _selectedGame = 'pisti';
 
   @override
   Widget build(BuildContext context) {
@@ -34,7 +35,7 @@ class _GameDemoScreenState extends State<GameDemoScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Yeni Oyun',
-            onPressed: () => setState(() {}), // Ekranı sıfırla
+            onPressed: () => setState(() {}),
           ),
         ],
         bottom: PreferredSize(
@@ -116,6 +117,9 @@ class _PistiDemoState extends State<_PistiDemo> {
   Timer? _botTimer;
   String? _playingCardId;
 
+  List<PlayingCard>? _collectingCards;
+  Alignment _collectTarget = Alignment.bottomCenter;
+
   static const me = 'me';
   static const bot = 'bot';
 
@@ -146,6 +150,7 @@ class _PistiDemoState extends State<_PistiDemo> {
     setState(() {
       _state = _engine.initializeGame(room);
       _playingCardId = null;
+      _collectingCards = null;
     });
     _maybeLetBotPlay();
   }
@@ -159,9 +164,17 @@ class _PistiDemoState extends State<_PistiDemo> {
     await Future.delayed(const Duration(milliseconds: 200));
     if (!mounted) return;
 
+    final tableBeforeMove = List<PlayingCard>.from(_state.tableCards);
+    final newState = _engine.applyMove(_state, me, move);
+    final didCollect = newState.tableCards.isEmpty && tableBeforeMove.isNotEmpty;
+
     setState(() {
-      _state = _engine.applyMove(_state, me, move);
+      _state = newState;
       _playingCardId = null;
+      if (didCollect) {
+        _collectingCards = [...tableBeforeMove, card];
+        _collectTarget = Alignment.bottomCenter;
+      }
     });
     _maybeLetBotPlay();
   }
@@ -175,7 +188,18 @@ class _PistiDemoState extends State<_PistiDemo> {
       final hand = _state.hands[bot] ?? [];
       if (hand.isEmpty) return;
       final card = hand[Random().nextInt(hand.length)];
-      setState(() => _state = _engine.applyMove(_state, bot, PistiMove(card)));
+
+      final tableBeforeMove = List<PlayingCard>.from(_state.tableCards);
+      final newState = _engine.applyMove(_state, bot, PistiMove(card));
+      final didCollect = newState.tableCards.isEmpty && tableBeforeMove.isNotEmpty;
+
+      setState(() {
+        _state = newState;
+        if (didCollect) {
+          _collectingCards = [...tableBeforeMove, card];
+          _collectTarget = Alignment.topCenter;
+        }
+      });
       _maybeLetBotPlay();
     });
   }
@@ -185,6 +209,10 @@ class _PistiDemoState extends State<_PistiDemo> {
     final over = _engine.isGameOver(_state);
     final myHand = _state.hands[me] ?? [];
     final myTurn = _state.currentTurnPlayerId == me && !over;
+    final scores = _engine.calculateScores(_state);
+    final myScore = scores[me] ?? 0;
+    final botScore = scores[bot] ?? 0;
+    final botHandCount = (_state.hands[bot] ?? []).length;
 
     return Container(
       decoration: const BoxDecoration(
@@ -197,63 +225,164 @@ class _PistiDemoState extends State<_PistiDemo> {
       child: SafeArea(
         child: Column(
           children: [
-            // ── Skor ──────────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+
+            // ── Kompakt Üst Şerit: Skor | Deste | Bot kartları ────────────
+            Container(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+              color: Colors.black.withValues(alpha: 0.15),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _pistiChip('Sen', _state.collectedCards[me]!.length,
-                      _state.pistiCounts[me]!, isActive: myTurn),
-                  _deckChip(_state.deck.length),
-                  _pistiChip('Bot', _state.collectedCards[bot]!.length,
-                      _state.pistiCounts[bot]!,
-                      isActive: !myTurn && !over),
+                  // Sen tarafı
+                  Expanded(
+                    child: _pistiChip('Sen',
+                      _state.collectedCards[me]!.length,
+                      _state.pistiCounts[me]!,
+                      score: myScore,
+                      isActive: myTurn,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  // Orta: Deste + Sıra göstergesi
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _deckChip(_state.deck.length),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: myTurn
+                              ? AppColors.gold.withValues(alpha: 0.15)
+                              : Colors.black.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: myTurn ? AppColors.gold.withValues(alpha: 0.5) : Colors.white12,
+                          ),
+                        ),
+                        child: Text(
+                          over ? 'Oyun bitti' : (myTurn ? '▶ Senin sıran' : 'Bot oynuyor'),
+                          style: TextStyle(
+                            color: myTurn ? AppColors.gold : Colors.white38,
+                            fontSize: 9,
+                            fontWeight: myTurn ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 6),
+                  // Bot tarafı: skor chip + mini kartlar
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _pistiChip('Bot',
+                          _state.collectedCards[bot]!.length,
+                          _state.pistiCounts[bot]!,
+                          score: botScore,
+                          isActive: !myTurn && !over,
+                        ),
+                        if (botHandCount > 0) ...[
+                          const SizedBox(height: 4),
+                          SizedBox(
+                            height: 36,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                for (int i = 0; i < botHandCount; i++)
+                                  Positioned(
+                                    right: i * 14.0,
+                                    child: const CardBackWidget(width: 28, height: 36),
+                                  ),
+                                SizedBox(width: botHandCount * 14.0 + 28),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
 
-            const SizedBox(height: 8),
-
-            if (over)
-              _pistiGameOver()
-            else ...[
-              _turnBanner(myTurn ? 'Senin sıran' : 'Bot oynuyor...', myTurn),
-              const SizedBox(height: 6),
-            ],
-
-            // ── Bot Kartları ───────────────────────────────────────────────
-            Wrap(
-              alignment: WrapAlignment.center,
-              spacing: -6,
-              children: List.generate(
-                (_state.hands[bot] ?? []).length,
-                (i) => const CardBackWidget(width: 44, height: 63),
+            // ── Kaydırılabilir orta bölüm: sadece masa ───────────────────
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (over)
+                      _pistiGameOver()
+                    else
+                      // ── Masa ──────────────────────────────────────────────
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          _tableArea(
+                            children: [
+                              for (int i = 0; i < _state.tableCards.length; i++)
+                                _AnimCard(
+                                  key: ValueKey('${_state.tableCards[i].id}_$i'),
+                                  child: PlayingCardWidget(
+                                    card: _state.tableCards[i],
+                                    width: 54,
+                                    height: 76,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (_collectingCards != null)
+                            CollectAnimationOverlay(
+                              cards: _collectingCards!,
+                              targetAlignment: _collectTarget,
+                              onCompleted: () {
+                                if (mounted) setState(() => _collectingCards = null);
+                              },
+                            ),
+                        ],
+                      ),
+                  ],
+                ),
               ),
             ),
 
-            const Spacer(),
-
-            // ── Masa ───────────────────────────────────────────────────────
-            _tableArea(
-              children: [
-                for (int i = 0; i < _state.tableCards.length; i++)
-                  _AnimCard(
-                    key: ValueKey('${_state.tableCards[i].id}_$i'),
-                    child: PlayingCardWidget(
-                      card: _state.tableCards[i],
-                      width: 58,
-                      height: 82,
+            // ── Sabit alt bölüm: oyuncunun el kartları her zaman görünür ──
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                ),
+                border: Border(
+                  top: BorderSide(
+                    color: AppColors.gold.withValues(alpha: 0.3),
+                    width: 1.2,
+                  ),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'ELİNDEKİ KARTLAR',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.3),
+                      fontSize: 8,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
                     ),
                   ),
-              ],
+                  const SizedBox(height: 6),
+                  _myHandWrap(myHand, myTurn),
+                ],
+              ),
             ),
-
-            const Spacer(),
-
-            // ── Benim Kartlarım ────────────────────────────────────────────
-            _myHandWrap(myHand, myTurn),
-            const SizedBox(height: 20),
           ],
         ),
       ),
@@ -314,13 +443,14 @@ class _BatakDemoState extends State<_BatakDemo> {
   Timer? _botTimer;
   String? _playingCardId;
 
+  bool _trickJustCompleted = false;
+  Timer? _trickClearTimer;
+
   static const me = 'p0';
-
-
   static const List<String> allPlayers = ['p0', 'p1', 'p2', 'p3'];
   static const botNames = {'p0': 'Sen', 'p1': 'Bot 1', 'p2': 'Bot 2', 'p3': 'Bot 3'};
 
-  int _myBid = 7; // Bid slider değeri
+  int _myBid = BatakEngine.minBid;
 
   @override
   void initState() {
@@ -331,6 +461,7 @@ class _BatakDemoState extends State<_BatakDemo> {
   @override
   void dispose() {
     _botTimer?.cancel();
+    _trickClearTimer?.cancel();
     super.dispose();
   }
 
@@ -348,20 +479,33 @@ class _BatakDemoState extends State<_BatakDemo> {
     setState(() {
       _state = _engine.initializeGame(room);
       _playingCardId = null;
-      _myBid = 7;
+      _myBid = BatakEngine.minBid;
+      _trickJustCompleted = false;
     });
+    _trickClearTimer?.cancel();
     _scheduleBotAction();
   }
 
-  // ── Bot Karar Mantığı ──────────────────────────────────────────────────────
+  void _afterMoveApplied() {
+    if (_state.currentTrick.length == 4) {
+      _trickJustCompleted = true;
+      _trickClearTimer?.cancel();
+      _trickClearTimer = Timer(const Duration(milliseconds: 1200), () {
+        if (mounted) setState(() => _trickJustCompleted = false);
+      });
+    } else {
+      _trickJustCompleted = false;
+    }
+  }
+
   void _scheduleBotAction() {
-    _botTimer?.cancel(); // Her zaman önce iptal et
+    _botTimer?.cancel();
     if (_state.currentTurnPlayerId == me) return;
     if (_engine.isGameOver(_state)) return;
 
-    int delayMs = 800; // Normal bot düşünme süresi
+    int delayMs = 800;
     if (_state.currentTrick.length == 4) {
-      delayMs = 2000; // El bitmişse 2 saniye bekle ki son atılan kart görülebilsin
+      delayMs = 1600;
     }
 
     _botTimer = Timer(Duration(milliseconds: delayMs), () {
@@ -374,8 +518,6 @@ class _BatakDemoState extends State<_BatakDemo> {
     final bot = _state.currentTurnPlayerId;
     if (bot == me) return;
 
-    // Güvenlik: Pas geçmiş bot SADECE ihale fazında tekrar aksiyon yapmamalı
-    // (playing fazında passedPlayers önceki ihaleden kalıyor, oynamayı engellememeli)
     if (_state.phase == BatakPhase.bidding && _state.passedPlayers.contains(bot)) {
       _scheduleBotAction();
       return;
@@ -389,15 +531,14 @@ class _BatakDemoState extends State<_BatakDemo> {
         int nextBid = currentBid + 1;
         bool willBid = false;
 
-        // Gerçekçi bot ihale mantığı:
         if (currentBid < 7) {
-          willBid = rng.nextDouble() < 0.7; // İlk ihaleye girme şansı %70
+          willBid = rng.nextDouble() < 0.7;
         } else if (currentBid == 7) {
-          willBid = rng.nextDouble() < 0.25; // 8 demesi %25 şans
+          willBid = rng.nextDouble() < 0.25;
         } else if (currentBid == 8) {
-          willBid = rng.nextDouble() < 0.05; // 9 demesi %5 şans
+          willBid = rng.nextDouble() < 0.05;
         } else {
-          willBid = false; // 9 ve üzerine bot rastgele girmesin
+          willBid = false;
         }
 
         if (willBid && nextBid <= BatakEngine.maxBid) {
@@ -407,7 +548,6 @@ class _BatakDemoState extends State<_BatakDemo> {
         }
         break;
       case BatakPhase.chooseTrump:
-        // Sadece elci koz seçebilir
         if (_state.declarerId != bot) return;
         final suits = Suit.values.toList()..shuffle();
         move = BatakMove.chooseTrump(suits.first);
@@ -429,7 +569,6 @@ class _BatakDemoState extends State<_BatakDemo> {
     }
 
     if (!_engine.isValidMove(_state, bot, move)) {
-      // Son çare: pas geç (sadece ihale fazında geçerli)
       if (_state.phase == BatakPhase.bidding) {
         move = const BatakMove.pass();
       } else {
@@ -439,18 +578,20 @@ class _BatakDemoState extends State<_BatakDemo> {
 
     setState(() {
       _state = _engine.applyMove(_state, bot, move);
-      // _myBid'i her zaman geçerli aralıkta tut
       final newMin = (_state.highestBid + 1).clamp(BatakEngine.minBid, BatakEngine.maxBid);
       if (_myBid < newMin) _myBid = newMin;
+      _afterMoveApplied();
     });
     _scheduleBotAction();
   }
 
-  // ── Kullanıcı Aksiyonları ──────────────────────────────────────────────────
   void _doMyAction(BatakMove move) {
     if (_state.currentTurnPlayerId != me) return;
     if (!_engine.isValidMove(_state, me, move)) return;
-    setState(() => _state = _engine.applyMove(_state, me, move));
+    setState(() {
+      _state = _engine.applyMove(_state, me, move);
+      _afterMoveApplied();
+    });
     _scheduleBotAction();
   }
 
@@ -466,15 +607,14 @@ class _BatakDemoState extends State<_BatakDemo> {
     setState(() {
       _state = _engine.applyMove(_state, me, move);
       _playingCardId = null;
+      _afterMoveApplied();
     });
     _scheduleBotAction();
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final over = _engine.isGameOver(_state);
-
     return Container(
       decoration: const BoxDecoration(
         gradient: RadialGradient(
@@ -486,12 +626,8 @@ class _BatakDemoState extends State<_BatakDemo> {
       child: SafeArea(
         child: Column(
           children: [
-            // ── Skor / Bilgi ──────────────────────────────────────────────
             _batakHeader(),
-
             const SizedBox(height: 6),
-
-            // ── Faz ───────────────────────────────────────────────────────
             if (over)
               Expanded(child: Center(child: _batakGameOver()))
             else
@@ -514,9 +650,8 @@ class _BatakDemoState extends State<_BatakDemo> {
           final isTurn = _state.currentTurnPlayerId == id;
           final isDeclarer = _state.declarerId == id;
           final isPassed = _state.passedPlayers.contains(id);
-          final currentBid = _state.bids[id]; // null = henüz girmedi
+          final currentBid = _state.bids[id];
 
-          // İhale fazı alt yazısı
           String subLabel;
           if (isBidding) {
             if (isPassed) {
@@ -530,7 +665,6 @@ class _BatakDemoState extends State<_BatakDemo> {
             subLabel = '$tricks el';
           }
 
-          // Renk
           Color subColor;
           if (isBidding) {
             subColor = isPassed
@@ -605,268 +739,261 @@ class _BatakDemoState extends State<_BatakDemo> {
     }
   }
 
-  // ── İhale Aşaması ─────────────────────────────────────────────────────────
   Widget _biddingUI() {
     final isMyTurn = _state.currentTurnPlayerId == me;
     final passed = _state.passedPlayers.contains(me);
-    // Mevcut en yüksek teklifin benim teklifim olup olmadığı
     final iAmHighestBidder = _state.highestBidderId == me;
 
-    // Slider için geçerli min/max hesapla
     final sliderMin = (_state.highestBid + 1)
         .clamp(BatakEngine.minBid, BatakEngine.maxBid)
         .toDouble();
     final sliderMax = BatakEngine.maxBid.toDouble();
-    // Mevcut değerin aralık dışında olmaması için clamp
     final sliderValue = _myBid.toDouble().clamp(sliderMin, sliderMax);
     final divisions = (sliderMax - sliderMin).round();
 
-    // Sıra bende ve pas geçmedim → her zaman ihaleye girebilirim
-    // (daha önce bid yapsam bile biri daha yüksek bid yaparsa tekrar sıram gelebilir)
     final canAct = isMyTurn && !passed;
 
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          _phaseBanner('⚡ İhale Aşaması'),
-          const SizedBox(height: 12),
-          // İhale geçmişi (en yüksek teklif vurgulanmış)
-          ..._state.bids.entries.map((e) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_state.highestBidderId == e.key)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 4),
-                        child: Icon(Icons.arrow_upward, size: 12, color: Color(0xFFD4AF37)),
-                      ),
-                    Text(
-                      '${botNames[e.key]} → ${e.value} el',
-                      style: TextStyle(
-                        color: _state.highestBidderId == e.key
-                            ? const Color(0xFFD4AF37)
-                            : Colors.white70,
-                        fontSize: 13,
-                        fontWeight: _state.highestBidderId == e.key
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ],
-                ),
-              )),
-          ..._state.passedPlayers.map((id) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(
-                  '${botNames[id]} → Pas',
-                  style: const TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-              )),
-          const SizedBox(height: 16),
-          // ━ Oyuncunun eli (daima görünür, bilgili ihale için)
-          _handReadOnly(_state.hands[me] ?? []),
-          const SizedBox(height: 8),
-          if (canAct) ...[
-            // Mevcut en yüksek teklif bilgisi
-            if (_state.highestBid > 0 && !iAmHighestBidder)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  'Güncel en yüksek: ${_state.highestBid} el (${botNames[_state.highestBidderId ?? '']})',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            Text(
-              iAmHighestBidder
-                  ? 'Lider sensin! Uzatmak ister misin?'
-                  : 'Kontratın: ${sliderValue.round()} el',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (divisions > 0)
-              Slider(
-                value: sliderValue,
-                min: sliderMin,
-                max: sliderMax,
-                divisions: divisions,
-                activeColor: AppColors.gold,
-                inactiveColor: Colors.white24,
-                label: '${sliderValue.round()}',
-                onChanged: (v) => setState(() => _myBid = v.round()),
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Text(
-                  'Maksimum kontrat ($sliderMax el) zaten verildi',
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  textAlign: TextAlign.center,
-                ),
-              ),
+    return SingleChildScrollView(  // ← dikey scroll ekledik
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _phaseBanner('⚡ İhale Aşaması'),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => _doMyAction(const BatakMove.pass()),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white54,
-                      side: const BorderSide(color: Colors.white24),
-                    ),
-                    child: const Text('Pas Geç'),
+            ..._state.bids.entries.map((e) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (_state.highestBidderId == e.key)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 4),
+                          child: Icon(Icons.arrow_upward, size: 12, color: Color(0xFFD4AF37)),
+                        ),
+                      Text(
+                        '${botNames[e.key]} → ${e.value} el',
+                        style: TextStyle(
+                          color: _state.highestBidderId == e.key
+                              ? const Color(0xFFD4AF37)
+                              : Colors.white70,
+                          fontSize: 13,
+                          fontWeight: _state.highestBidderId == e.key
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
+                      ),
+                    ],
+                  ),
+                )),
+            ..._state.passedPlayers.map((id) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    '${botNames[id]} → Pas',
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                )),
+            const SizedBox(height: 16),
+            _handReadOnly(_state.hands[me] ?? []),
+            const SizedBox(height: 8),
+            if (canAct) ...[
+              if (_state.highestBid > 0 && !iAmHighestBidder)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'Güncel en yüksek: ${_state.highestBid} el (${botNames[_state.highestBidderId ?? '']})',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: divisions > 0
-                        ? () => _doMyAction(BatakMove.bid(sliderValue.round()))
-                        : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.gold,
-                      foregroundColor: Colors.black,
-                    ),
-                    child: Text('${sliderValue.round()} El Kontrat'),
+              Text(
+                iAmHighestBidder
+                    ? 'Lider sensin! Uzatmak ister misin?'
+                    : 'Kontratın: ${sliderValue.round()} el',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (divisions > 0)
+                Slider(
+                  value: sliderValue,
+                  min: sliderMin,
+                  max: sliderMax,
+                  divisions: divisions,
+                  activeColor: AppColors.gold,
+                  inactiveColor: Colors.white24,
+                  label: '${sliderValue.round()}',
+                  onChanged: (v) => setState(() => _myBid = v.round()),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    'Maksimum kontrat ($sliderMax el) zaten verildi',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-              ],
-            ),
-          ] else if (!isMyTurn) ...[
-            _turnBanner('${botNames[_state.currentTurnPlayerId]} ihale yapıyor...', false),
-          ] else ...[
-            // Pas geçildi
-            _turnBanner('Pas geçtin — diğerleri bekleniyor', false),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _doMyAction(const BatakMove.pass()),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white54,
+                        side: const BorderSide(color: Colors.white24),
+                      ),
+                      child: const Text('Pas Geç'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: divisions > 0
+                          ? () => _doMyAction(BatakMove.bid(sliderValue.round()))
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.gold,
+                        foregroundColor: Colors.black,
+                      ),
+                      child: Text('${sliderValue.round()} El Kontrat'),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (!isMyTurn) ...[
+              _turnBanner('${botNames[_state.currentTurnPlayerId]} ihale yapıyor...', false),
+            ] else ...[
+              _turnBanner('Pas geçtin — diğerleri bekleniyor', false),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 
-  // ── Koz Seçme Aşaması ────────────────────────────────────────────────────
   Widget _chooseTrumpUI() {
     final isMyTurn = _state.currentTurnPlayerId == me;
-
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          _phaseBanner('🃏 Koz Seç'),
-          const SizedBox(height: 8),
-          Text(
-            'Elci: ${botNames[_state.declarerId ?? '']!}  —  Kontrat: ${_state.highestBid} el',
-            style: const TextStyle(color: Colors.white70, fontSize: 13),
-          ),
-          const SizedBox(height: 24),
-          if (isMyTurn) ...[
-            const Text(
-              'Koz olarak hangi rengi seçiyorsun?',
-              style: TextStyle(color: Colors.white, fontSize: 15),
-              textAlign: TextAlign.center,
+    return SingleChildScrollView(  // ← dikey scroll eklendi
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _phaseBanner('🃏 Koz Seç'),
+            const SizedBox(height: 8),
+            Text(
+              'Elci: ${botNames[_state.declarerId ?? '']!}  —  Kontrat: ${_state.highestBid} el',
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              alignment: WrapAlignment.center,
-              children: Suit.values.map((suit) {
-                return GestureDetector(
-                  onTap: () => _doMyAction(BatakMove.chooseTrump(suit)),
-                  child: Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.07),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white24),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 36,
-                          height: 36,
-                          child: CustomPaint(
-                            painter: _SuitIconPainter(suit: suit),
+            const SizedBox(height: 24),
+            if (isMyTurn) ...[
+              const Text(
+                'Koz olarak hangi rengi seçiyorsun?',
+                style: TextStyle(color: Colors.white, fontSize: 15),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
+                children: Suit.values.map((suit) {
+                  return GestureDetector(
+                    onTap: () => _doMyAction(BatakMove.chooseTrump(suit)),
+                    child: Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 36,
+                            height: 36,
+                            child: CustomPaint(
+                              painter: _SuitIconPainter(suit: suit),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _suitName(suit),
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 10),
-                        ),
-                      ],
+                          const SizedBox(height: 4),
+                          Text(
+                            _suitName(suit),
+                            style: const TextStyle(color: Colors.white70, fontSize: 10),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ] else ...[
-            _turnBanner('${botNames[_state.declarerId ?? '']!} koz seçiyor...', false),
+                  );
+                }).toList(),
+              ),
+            ] else ...[
+              _turnBanner('${botNames[_state.declarerId ?? '']!} koz seçiyor...', false),
+            ],
+            const SizedBox(height: 16),
           ],
-          const SizedBox(height: 16),
-        ],
+        ),
       ),
     );
   }
 
-  // ── Oynama Aşaması ────────────────────────────────────────────────────────
   Widget _playingUI() {
     final myHand = _state.hands[me] ?? [];
     final myTurn = _state.currentTurnPlayerId == me;
+    final waitingToStartNewTrick = myTurn && _state.currentTrick.length == 4;
 
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (_state.trumpSuit != null) ...[
-                Text(
-                  'Koz: ${_suitName(_state.trumpSuit!)}  •  ',
-                  style: const TextStyle(
-                    color: Colors.amberAccent,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+    return SingleChildScrollView(  // ← dikey scroll eklendi
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_state.trumpSuit != null) ...[
+                  Text(
+                    'Koz: ${_suitName(_state.trumpSuit!)}  •  ',
+                    style: const TextStyle(
+                      color: Colors.amberAccent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
+                ],
+                Text(
+                  'Kontrat: ${_state.highestBid} el  •  Kontratçı: ${botNames[_state.declarerId ?? '']}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 11),
                 ),
               ],
-              Text(
-                'Kontrat: ${_state.highestBid} el  •  Kontratçı: ${botNames[_state.declarerId ?? '']}',
-                style: const TextStyle(color: Colors.white70, fontSize: 11),
-              ),
-            ],
+            ),
           ),
-        ),
 
-        // Mevcut el (2D Daire Masa Düzeni)
-        _buildBatakTable(),
+          _buildBatakTable(),
 
-        if (!myTurn)
-          _turnBanner(
-              '${botNames[_state.currentTurnPlayerId]} oynuyor...', false)
-        else
-          _turnBanner('Senin sıran', true),
+          if (waitingToStartNewTrick)
+            _turnBanner('Eli aldın! Yeni eli başlatmak için bir kart oyna', true)
+          else if (!myTurn)
+            _turnBanner('${botNames[_state.currentTurnPlayerId]} oynuyor...', false)
+          else
+            _turnBanner('Senin sıran', true),
 
-        // Benim kartlarım — 2 satır düzeni
-        _myHand2Rows(myHand, myTurn),
-        const SizedBox(height: 6),
-      ],
+          _myHand2Rows(myHand, myTurn),
+          const SizedBox(height: 6),
+        ],
+      ),
     );
   }
 
-  // İki satır kart düzeni: 13 kart üst+alt, sıralanmış, örtüşerek
   Widget _myHand2Rows(List<PlayingCard> hand, bool myTurn) {
     if (hand.isEmpty) return const SizedBox.shrink();
-    // Renk önce, sonra değer sırası
     final sorted = List<PlayingCard>.from(hand)
       ..sort((a, b) => a.suit != b.suit
           ? a.suit.index.compareTo(b.suit.index)
@@ -874,7 +1001,7 @@ class _BatakDemoState extends State<_BatakDemo> {
     final mid = (sorted.length / 2).ceil();
     final topRow = sorted.sublist(0, mid);
     final botRow = sorted.sublist(mid);
-    final ledSuit = _state.currentTrick.isNotEmpty
+    final ledSuit = (_state.currentTrick.isNotEmpty && _state.currentTrick.length < 4)
         ? _state.currentTrick.first.card.suit
         : null;
     final hasLedSuitInHand = ledSuit != null && hand.any((c) => c.suit == ledSuit);
@@ -884,21 +1011,20 @@ class _BatakDemoState extends State<_BatakDemo> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _fanRow(topRow, myTurn, ledSuit, hasLedSuitInHand, hand),
+          _fanRow(topRow, myTurn, ledSuit, hasLedSuitInHand),
           const SizedBox(height: 4),
-          _fanRow(botRow, myTurn, ledSuit, hasLedSuitInHand, hand),
+          _fanRow(botRow, myTurn, ledSuit, hasLedSuitInHand),
         ],
       ),
     );
   }
 
-  // Tek satır örtüşen kart fanı (z-order: soldaki üstte)
+  // ─── Düzeltilmiş _fanRow: taşma durumunda yatay kaydırma ──────────────────
   Widget _fanRow(
     List<PlayingCard> cards,
     bool myTurn,
     Suit? ledSuit,
     bool hasLedSuitInHand,
-    List<PlayingCard> fullHand,
   ) {
     const cardW = 52.0;
     const cardH = 72.0;
@@ -910,12 +1036,17 @@ class _BatakDemoState extends State<_BatakDemo> {
       final availW = constraints.maxWidth.isFinite
           ? constraints.maxWidth
           : MediaQuery.of(context).size.width - 16;
-      final step = n > 1
-          ? ((availW - cardW) / (n - 1)).clamp(14.0, 46.0)
-          : 0.0;
-      final totalW = n > 1 ? cardW + step * (n - 1) : cardW;
 
-      return SizedBox(
+      // Kartların sığabilmesi için maksimum adım
+      final maxStep = n > 1 ? (availW - cardW) / (n - 1) : 0.0;
+      // Adımı 10..46 aralığında tut, ama maxStep'ten büyük olmasın
+      final step = n > 1 ? maxStep.clamp(10.0, 46.0) : 0.0;
+      final actualStep = step > maxStep ? maxStep : step;
+
+      final totalW = n > 1 ? cardW + actualStep * (n - 1) : cardW;
+      final needsScroll = totalW > availW;
+
+      Widget rowContent = SizedBox(
         width: totalW,
         height: cardH + liftH,
         child: Stack(
@@ -930,7 +1061,7 @@ class _BatakDemoState extends State<_BatakDemo> {
               final playing = _playingCardId == card.id;
 
               return Positioned(
-                left: i * step,
+                left: i * actualStep,
                 bottom: canPlay ? liftH : 0.0,
                 child: AnimatedSlide(
                   offset: playing ? const Offset(0, -1) : Offset.zero,
@@ -956,9 +1087,17 @@ class _BatakDemoState extends State<_BatakDemo> {
           ],
         ),
       );
+
+      if (needsScroll) {
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: rowContent,
+        );
+      } else {
+        return rowContent;
+      }
     });
   }
-
 
   Widget _batakGameOver() {
     final scores = _engine.calculateScores(_state);
@@ -976,7 +1115,6 @@ class _BatakDemoState extends State<_BatakDemo> {
     );
   }
 
-  /// Sadece görüntüleme amaçlı el (ihale ekranı) — Renk satır düzeni
   Widget _handReadOnly(List<PlayingCard> hand) {
     if (hand.isEmpty) return const SizedBox.shrink();
     final bySuit = <Suit, List<PlayingCard>>{};
@@ -1027,16 +1165,17 @@ class _BatakDemoState extends State<_BatakDemo> {
     );
   }
 
-
-
-  /// Batak Masası — Büyütülmüş (280px), ortaya hizalı, koz göstergeli
   Widget _buildBatakTable() {
+    final trickToShow = (_state.currentTrick.length == 4 && !_trickJustCompleted)
+        ? const <TrickCard>[]
+        : _state.currentTrick;
+
     PlayingCard? southCard;
     PlayingCard? westCard;
     PlayingCard? northCard;
     PlayingCard? eastCard;
 
-    for (final tc in _state.currentTrick) {
+    for (final tc in trickToShow) {
       if (tc.playerId == 'p0') {
         southCard = tc.card;
       } else if (tc.playerId == 'p1') {
@@ -1080,7 +1219,6 @@ class _BatakDemoState extends State<_BatakDemo> {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // North (Bot 2)
             if (northCard != null)
               Positioned(
                 top: edge,
@@ -1098,7 +1236,6 @@ class _BatakDemoState extends State<_BatakDemo> {
                   ],
                 ),
               ),
-            // West (Bot 1)
             if (westCard != null)
               Positioned(
                 left: edge,
@@ -1119,7 +1256,6 @@ class _BatakDemoState extends State<_BatakDemo> {
                   ],
                 ),
               ),
-            // East (Bot 3)
             if (eastCard != null)
               Positioned(
                 right: edge,
@@ -1140,7 +1276,6 @@ class _BatakDemoState extends State<_BatakDemo> {
                   ],
                 ),
               ),
-            // South (Sen)
             if (southCard != null)
               Positioned(
                 bottom: edge,
@@ -1161,8 +1296,7 @@ class _BatakDemoState extends State<_BatakDemo> {
                   ],
                 ),
               ),
-            // Koz göstergesi (boş masa)
-            if (_state.currentTrick.isEmpty)
+            if (trickToShow.isEmpty)
               Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1203,21 +1337,21 @@ class _BatakDemoState extends State<_BatakDemo> {
   }
 }
 
-
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Ortak Yardımcı Widget'lar
 // ═══════════════════════════════════════════════════════════════════════════════
 
 Widget _tableArea({required List<Widget> children}) {
   return Container(
-    margin: const EdgeInsets.symmetric(horizontal: 20),
-    constraints: const BoxConstraints(minHeight: 90, maxHeight: 110),
+    margin: const EdgeInsets.symmetric(horizontal: 12),
+    // maxHeight kaldırıldı → ikinci satır sığsın
+    constraints: const BoxConstraints(minHeight: 90),
     decoration: BoxDecoration(
       color: Colors.black.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(100),
+      borderRadius: BorderRadius.circular(20),
       border: Border.all(color: Colors.white.withValues(alpha: 0.07), width: 1.5),
     ),
+    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
     child: children.isEmpty
         ? Center(
             child: Text(
@@ -1228,8 +1362,11 @@ Widget _tableArea({required List<Widget> children}) {
                   fontStyle: FontStyle.italic),
             ),
           )
-        : Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+        : Wrap(
+            alignment: WrapAlignment.center,
+            runAlignment: WrapAlignment.center,
+            spacing: 2,
+            runSpacing: 6,
             children: children,
           ),
   );
@@ -1341,7 +1478,7 @@ Widget _gameOverBanner(
   );
 }
 
-Widget _pistiChip(String label, int cards, int pisti, {required bool isActive}) {
+Widget _pistiChip(String label, int cards, int pisti, {required bool isActive, int score = 0}) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
     decoration: BoxDecoration(
@@ -1360,10 +1497,16 @@ Widget _pistiChip(String label, int cards, int pisti, {required bool isActive}) 
         Text(label,
             style: TextStyle(
                 color: isActive ? Colors.white : Colors.white54, fontSize: 10)),
-        const SizedBox(height: 3),
+        const SizedBox(height: 2),
         Text('$cards kart · $pisti pişti',
             style: const TextStyle(
-                color: AppColors.gold, fontSize: 11, fontWeight: FontWeight.bold)),
+                color: AppColors.gold, fontSize: 10, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 1),
+        Text('$score puan',
+            style: TextStyle(
+                color: isActive ? Colors.white : Colors.white38,
+                fontSize: 9,
+                fontWeight: FontWeight.w500)),
       ],
     ),
   );
