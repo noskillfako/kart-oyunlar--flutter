@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'lobby_screen.dart';
-import 'game_demo_screen.dart';
+import 'demo_selection_screen.dart';
 import 'set_name_screen.dart';
 import '../services/user_prefs_service.dart';
 import '../services/auth_service.dart';
@@ -165,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen>
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                            builder: (_) => const GameDemoScreen()),
+                            builder: (_) => const DemoSelectionScreen()),
                       );
                     },
                   ),

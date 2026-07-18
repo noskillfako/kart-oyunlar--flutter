@@ -124,15 +124,13 @@ class BatakEngine implements GameEngine<BatakGameState, BatakMove> {
 
                 if (highestTrumpCard != null) {
                    // Yerde zaten koz var.
-                   final hasHigherTrump = trumpCards.any((c) => _rankValue(c.rank) > _rankValue(highestTrumpCard!.rank));
+                   // Elinde koz varken başka renk atamazsın (koz atmak zorundasın).
+                   if (card.suit != trumpSuit) return false;
                    
+                   final hasHigherTrump = trumpCards.any((c) => _rankValue(c.rank) > _rankValue(highestTrumpCard!.rank));
                    if (hasHigherTrump) {
-                     // 1) Eğer daha büyük kozun varsa, kesinlikle koz atmak VE onu geçmek zorundasın.
-                     if (card.suit != trumpSuit) return false;
+                     // Eğer daha büyük kozun varsa, onu geçmek zorundasın.
                      if (_rankValue(card.rank) <= _rankValue(highestTrumpCard.rank)) return false;
-                   } else {
-                     // 2) Eğer daha büyük kozun YOKSA, altından koz atma ZORUNLULUĞU yoktur! 
-                     // İstediğin rengi atabilirsin VEYA küçük kozunu atabilirsin.
                    }
                 } else {
                    // Yerde henüz koz yok (ilk çakan sen olacaksın)
@@ -317,17 +315,22 @@ class BatakEngine implements GameEngine<BatakGameState, BatakMove> {
     final declarer = state.declarerId;
     if (declarer == null) return scores;
 
-    final declarerTricks = state.tricksWon[declarer] ?? 0;
-    scores[declarer] = declarerTricks >= state.highestBid
-        ? state.highestBid * 10
-        : -(state.highestBid * 10);
+    final highestBid = state.highestBid;
 
+    // Declarer (İhaleyi alan)
+    final declarerTricks = state.tricksWon[declarer] ?? 0;
+    scores[declarer] = declarerTricks >= highestBid
+        ? highestBid * 10
+        : -(highestBid * 10);
+
+    // Non-Declarers (İhaleye girmeyenler)
     for (final id in state.playerOrder) {
       if (id == declarer) continue;
       final tricks = state.tricksWon[id] ?? 0;
-      scores[id] = tricks * 2;
-      if (tricks == 0) {
-        scores[id] = scores[id]! - 10; // "battı" cezası
+      if (tricks > 0) {
+        scores[id] = tricks * 10; // İhaleye girmeyip el alanlara el sayısı * 10
+      } else {
+        scores[id] = -(highestBid * 10); // İhaleye girmeyip 0 çekenlere ihale bedeli kadar ceza
       }
     }
 

@@ -12,94 +12,40 @@ import '../widgets/playing_card_widget.dart';
 import '../widgets/collect_animation_overlay.dart';
 import '../theme/app_theme.dart';
 
-// ─── Oyun Modu Seçici ─────────────────────────────────────────────────────────
-class GameDemoScreen extends StatefulWidget {
-  const GameDemoScreen({super.key});
-
-  @override
-  State<GameDemoScreen> createState() => _GameDemoScreenState();
-}
-
-class _GameDemoScreenState extends State<GameDemoScreen> {
-  String _selectedGame = 'pisti';
+// ─── Oyun Demo Ekranı (Pişti veya Batak) ─────────────────────────────────────
+class GameDemoScreen extends StatelessWidget {
+  final String gameType; // 'pisti' veya 'batak'
+  const GameDemoScreen({super.key, required this.gameType});
 
   @override
   Widget build(BuildContext context) {
+    final isPisti = gameType == 'pisti';
     return Scaffold(
       backgroundColor: AppColors.deepGreen,
       appBar: AppBar(
-        title: const Text('Demo Oyun (Bot ile)'),
+        title: Text(isPisti ? 'Pişti Demo' : 'Batak Demo'),
         backgroundColor: AppColors.darkGreen,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'Yeni Oyun',
-            onPressed: () => setState(() {}),
+            onPressed: () {
+              // Sayfayı yeniden yükle
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => GameDemoScreen(gameType: gameType),
+                ),
+              );
+            },
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(44),
-          child: Container(
-            color: AppColors.darkGreen,
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: Row(
-              children: [
-                _tabBtn('pisti', 'Pişti  (2K)', Icons.style_rounded),
-                const SizedBox(width: 8),
-                _tabBtn('batak', 'Batak  (4K)', Icons.casino_rounded),
-              ],
-            ),
-          ),
-        ),
       ),
-      body: KeyedSubtree(
-        key: ValueKey(_selectedGame),
-        child: _selectedGame == 'pisti'
-            ? const _PistiDemo()
-            : const _BatakDemo(),
-      ),
-    );
-  }
-
-  Widget _tabBtn(String id, String label, IconData icon) {
-    final sel = _selectedGame == id;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _selectedGame = id),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 7),
-          decoration: BoxDecoration(
-            color: sel
-                ? AppColors.gold.withValues(alpha: 0.18)
-                : Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: sel ? AppColors.gold : Colors.white24,
-              width: sel ? 1.5 : 0.7,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 15, color: sel ? AppColors.gold : Colors.white54),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: sel ? AppColors.gold : Colors.white54,
-                  fontSize: 12,
-                  fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      body: isPisti ? const _PistiDemo() : const _BatakDemo(),
     );
   }
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PİŞTİ DEMO
@@ -760,39 +706,6 @@ class _BatakDemoState extends State<_BatakDemo> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _phaseBanner('⚡ İhale Aşaması'),
-            const SizedBox(height: 12),
-            ..._state.bids.entries.map((e) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (_state.highestBidderId == e.key)
-                        const Padding(
-                          padding: EdgeInsets.only(right: 4),
-                          child: Icon(Icons.arrow_upward, size: 12, color: Color(0xFFD4AF37)),
-                        ),
-                      Text(
-                        '${botNames[e.key]} → ${e.value} el',
-                        style: TextStyle(
-                          color: _state.highestBidderId == e.key
-                              ? const Color(0xFFD4AF37)
-                              : Colors.white70,
-                          fontSize: 13,
-                          fontWeight: _state.highestBidderId == e.key
-                              ? FontWeight.bold
-                              : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                )),
-            ..._state.passedPlayers.map((id) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Text(
-                    '${botNames[id]} → Pas',
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                )),
             const SizedBox(height: 16),
             _handReadOnly(_state.hands[me] ?? []),
             const SizedBox(height: 8),
@@ -949,48 +862,93 @@ class _BatakDemoState extends State<_BatakDemo> {
     final myTurn = _state.currentTurnPlayerId == me;
     final waitingToStartNewTrick = myTurn && _state.currentTrick.length == 4;
 
-    return SingleChildScrollView(  // ← dikey scroll eklendi
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+    final bannerText = waitingToStartNewTrick
+        ? 'Eli aldın!'
+        : (myTurn ? '▶ Senin sıran' : '${botNames[_state.currentTurnPlayerId]} oynuyor...');
+    final bannerActive = myTurn || waitingToStartNewTrick;
+
+    return Column(
+      children: [
+        // ── Koz / Kontrat: header altında ince şerit ──────────────────────
+        if (_state.trumpSuit != null || _state.declarerId != null)
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                if (_state.trumpSuit != null) ...[
-                  Text(
-                    'Koz: ${_suitName(_state.trumpSuit!)}  •  ',
-                    style: const TextStyle(
-                      color: Colors.amberAccent,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-                Text(
-                  'Kontrat: ${_state.highestBid} el  •  Kontratçı: ${botNames[_state.declarerId ?? '']}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 11),
-                ),
-              ],
+            padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
+            child: Text(
+              [
+                if (_state.trumpSuit != null) 'Koz: ${_suitName(_state.trumpSuit!)}',
+                'Kontrat: ${_state.highestBid} el',
+                'Kontratçı: ${botNames[_state.declarerId ?? '']}',
+              ].join('  •  '),
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 10,
+              ),
+              textAlign: TextAlign.center,
             ),
           ),
 
-          _buildBatakTable(),
+        // ── Masa: kalan dikey alanı tam doldurur + banner overlay ─────────
+        Expanded(
+          child: LayoutBuilder(builder: (ctx, constraints) {
+            final availW = constraints.maxWidth.isFinite ? constraints.maxWidth - 8 : 280.0;
+            final availH = constraints.maxHeight.isFinite ? constraints.maxHeight - 8 : 280.0;
+            final size = (availW < availH ? availW : availH).clamp(180.0, 500.0);
 
-          if (waitingToStartNewTrick)
-            _turnBanner('Eli aldın! Yeni eli başlatmak için bir kart oyna', true)
-          else if (!myTurn)
-            _turnBanner('${botNames[_state.currentTurnPlayerId]} oynuyor...', false)
-          else
-            _turnBanner('Senin sıran', true),
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                _buildBatakTable(tableSize: size),
+                // Sıra banneri: masanın alt kenarına overlay
+                Positioned(
+                  bottom: (constraints.maxHeight - size) / 2 + 6,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: bannerActive
+                          ? AppColors.gold.withValues(alpha: 0.88)
+                          : Colors.black.withValues(alpha: 0.65),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      bannerText,
+                      style: TextStyle(
+                        color: bannerActive ? Colors.black : Colors.white70,
+                        fontSize: 11,
+                        fontWeight: bannerActive ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }),
+        ),
 
-          _myHand2Rows(myHand, myTurn),
-          const SizedBox(height: 6),
-        ],
-      ),
+        // ── Sabit alt panel: el kartları her zaman görünür ───────────────
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.22),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(20),
+              topRight: Radius.circular(20),
+            ),
+            border: Border(
+              top: BorderSide(
+                color: AppColors.gold.withValues(alpha: 0.3),
+                width: 1.2,
+              ),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 14),
+          child: _myHand2Rows(myHand, myTurn),
+        ),
+      ],
     );
   }
+
+
+
 
   Widget _myHand2Rows(List<PlayingCard> hand, bool myTurn) {
     if (hand.isEmpty) return const SizedBox.shrink();
@@ -1117,55 +1075,64 @@ class _BatakDemoState extends State<_BatakDemo> {
 
   Widget _handReadOnly(List<PlayingCard> hand) {
     if (hand.isEmpty) return const SizedBox.shrink();
-    final bySuit = <Suit, List<PlayingCard>>{};
-    for (final card in hand) {
-      bySuit.putIfAbsent(card.suit, () => []).add(card);
+
+    // Önce renge göre sırala, sonra 2 satıra böl
+    final sorted = List<PlayingCard>.from(hand)
+      ..sort((a, b) => a.suit != b.suit
+          ? a.suit.index.compareTo(b.suit.index)
+          : a.rank.index.compareTo(b.rank.index));
+
+    final mid = (sorted.length / 2).ceil();
+    final row1 = sorted.sublist(0, mid);
+    final row2 = sorted.sublist(mid);
+
+    Widget buildRow(List<PlayingCard> cards) {
+      if (cards.isEmpty) return const SizedBox.shrink();
+      const cardW = 44.0;
+      const cardH = 62.0;
+      return LayoutBuilder(builder: (ctx, constraints) {
+        final availW = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.of(context).size.width - 16;
+        final n = cards.length;
+        final step = n > 1
+            ? ((availW - cardW) / (n - 1)).clamp(10.0, 42.0)
+            : 0.0;
+        final totalW = n > 1 ? cardW + step * (n - 1) : cardW;
+        return Center(
+          child: SizedBox(
+            width: totalW,
+            height: cardH,
+            child: Stack(
+              children: [
+                for (int i = n - 1; i >= 0; i--)
+                  Positioned(
+                    left: i * step,
+                    child: PlayingCardWidget(
+                        card: cards[i], width: cardW, height: cardH),
+                  ),
+              ],
+            ),
+          ),
+        );
+      });
     }
-    for (final cards in bySuit.values) {
-      cards.sort((a, b) => a.rank.index.compareTo(b.rank.index));
-    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: Suit.values.where((s) => bySuit.containsKey(s)).map((suit) {
-          final cards = bySuit[suit]!;
-          final n = cards.length;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 3),
-            child: LayoutBuilder(builder: (ctx, constraints) {
-              const cardW = 44.0;
-              const cardH = 62.0;
-              final availW = constraints.maxWidth.isFinite
-                  ? constraints.maxWidth
-                  : MediaQuery.of(context).size.width - 16;
-              final step = n > 1
-                  ? ((availW - cardW) / (n - 1)).clamp(10.0, 40.0)
-                  : 0.0;
-              final totalW = n > 1 ? cardW + step * (n - 1) : cardW;
-              return SizedBox(
-                width: totalW,
-                height: cardH,
-                child: Stack(
-                  children: [
-                    for (int i = n - 1; i >= 0; i--)
-                      Positioned(
-                        left: i * step,
-                        child: PlayingCardWidget(
-                            card: cards[i], width: cardW, height: cardH),
-                      ),
-                  ],
-                ),
-              );
-            }),
-          );
-        }).toList(),
+        children: [
+          buildRow(row1),
+          const SizedBox(height: 8),
+          buildRow(row2),
+        ],
       ),
     );
   }
 
-  Widget _buildBatakTable() {
+
+  Widget _buildBatakTable({double tableSize = 270}) {
     final trickToShow = (_state.currentTrick.length == 4 && !_trickJustCompleted)
         ? const <TrickCard>[]
         : _state.currentTrick;
@@ -1187,7 +1154,6 @@ class _BatakDemoState extends State<_BatakDemo> {
       }
     }
 
-    const tableSize = 280.0;
     const cardW = 48.0;
     const cardH = 67.0;
     const edge = 16.0;
@@ -1196,145 +1162,147 @@ class _BatakDemoState extends State<_BatakDemo> {
       child: Container(
         width: tableSize,
         height: tableSize,
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        decoration: BoxDecoration(
-          gradient: const RadialGradient(
-            colors: [Color(0xFF22683A), Color(0xFF0D3018)],
-            center: Alignment.center,
-            radius: 0.9,
+        margin: const EdgeInsets.symmetric(vertical: 4),
+
+          decoration: BoxDecoration(
+            gradient: const RadialGradient(
+              colors: [Color(0xFF22683A), Color(0xFF0D3018)],
+              center: Alignment.center,
+              radius: 0.9,
+            ),
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0xFFD4AF37), width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.4),
+                blurRadius: 18, spreadRadius: 1,
+              ),
+              BoxShadow(
+                color: const Color(0xFFD4AF37).withValues(alpha: 0.1),
+                blurRadius: 6, spreadRadius: -2,
+              ),
+            ],
           ),
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFD4AF37), width: 2.5),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.4),
-              blurRadius: 18, spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: const Color(0xFFD4AF37).withValues(alpha: 0.1),
-              blurRadius: 6, spreadRadius: -2,
-            ),
-          ],
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            if (northCard != null)
-              Positioned(
-                top: edge,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('Bot 2',
-                        style: TextStyle(color: Colors.white60, fontSize: 8)),
-                    const SizedBox(height: 2),
-                    _AnimCard(
-                      key: ValueKey('${northCard.id}_n'),
-                      child: PlayingCardWidget(
-                          card: northCard, width: cardW, height: cardH),
-                    ),
-                  ],
-                ),
-              ),
-            if (westCard != null)
-              Positioned(
-                left: edge,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const RotatedBox(
-                      quarterTurns: 1,
-                      child: Text('Bot 1',
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (northCard != null)
+                Positioned(
+                  top: edge,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Bot 2',
                           style: TextStyle(color: Colors.white60, fontSize: 8)),
-                    ),
-                    const SizedBox(width: 3),
-                    _AnimCard(
-                      key: ValueKey('${westCard.id}_w'),
-                      child: PlayingCardWidget(
-                          card: westCard, width: cardW, height: cardH),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      _AnimCard(
+                        key: ValueKey('${northCard.id}_n'),
+                        child: PlayingCardWidget(
+                            card: northCard, width: cardW, height: cardH),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            if (eastCard != null)
-              Positioned(
-                right: edge,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _AnimCard(
-                      key: ValueKey('${eastCard.id}_e'),
-                      child: PlayingCardWidget(
-                          card: eastCard, width: cardW, height: cardH),
-                    ),
-                    const SizedBox(width: 3),
-                    const RotatedBox(
-                      quarterTurns: 3,
-                      child: Text('Bot 3',
-                          style: TextStyle(color: Colors.white60, fontSize: 8)),
-                    ),
-                  ],
+              if (westCard != null)
+                Positioned(
+                  left: edge,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const RotatedBox(
+                        quarterTurns: 1,
+                        child: Text('Bot 1',
+                            style: TextStyle(color: Colors.white60, fontSize: 8)),
+                      ),
+                      const SizedBox(width: 3),
+                      _AnimCard(
+                        key: ValueKey('${westCard.id}_w'),
+                        child: PlayingCardWidget(
+                            card: westCard, width: cardW, height: cardH),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            if (southCard != null)
-              Positioned(
-                bottom: edge,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _AnimCard(
-                      key: ValueKey('${southCard.id}_s'),
-                      child: PlayingCardWidget(
-                          card: southCard, width: cardW, height: cardH),
-                    ),
-                    const SizedBox(height: 2),
-                    const Text('Sen',
-                        style: TextStyle(
+              if (eastCard != null)
+                Positioned(
+                  right: edge,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _AnimCard(
+                        key: ValueKey('${eastCard.id}_e'),
+                        child: PlayingCardWidget(
+                            card: eastCard, width: cardW, height: cardH),
+                      ),
+                      const SizedBox(width: 3),
+                      const RotatedBox(
+                        quarterTurns: 3,
+                        child: Text('Bot 3',
+                            style: TextStyle(color: Colors.white60, fontSize: 8)),
+                      ),
+                    ],
+                  ),
+                ),
+              if (southCard != null)
+                Positioned(
+                  bottom: edge,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _AnimCard(
+                        key: ValueKey('${southCard.id}_s'),
+                        child: PlayingCardWidget(
+                            card: southCard, width: cardW, height: cardH),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text('Sen',
+                          style: TextStyle(
+                              color: Color(0xFFD4AF37),
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+              if (trickToShow.isEmpty)
+                Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_state.trumpSuit != null) ...[
+                        SizedBox(
+                          width: 34,
+                          height: 34,
+                          child: CustomPaint(
+                            painter: _SuitIconPainter(suit: _state.trumpSuit!),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Koz: ${_suitName(_state.trumpSuit!)}',
+                          style: const TextStyle(
                             color: Color(0xFFD4AF37),
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold)),
-                  ],
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ] else
+                        Text(
+                          'Yeni el başlıyor…',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.35),
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            if (trickToShow.isEmpty)
-              Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_state.trumpSuit != null) ...[
-                      SizedBox(
-                        width: 34,
-                        height: 34,
-                        child: CustomPaint(
-                          painter: _SuitIconPainter(suit: _state.trumpSuit!),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Koz: ${_suitName(_state.trumpSuit!)}',
-                        style: const TextStyle(
-                          color: Color(0xFFD4AF37),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ] else
-                      Text(
-                        'Yeni el başlıyor…',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.35),
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
-      ),
-    );
+      );
   }
+
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1568,84 +1536,150 @@ class _AnimCard extends StatelessWidget {
 }
 
 // ─── Suit İkon Painter (Koz seçme ekranı için) ───────────────────────────────
+// ─── Suit İkon Painter (Koz seçme ekranı için) ───────────────────────────────
 class _SuitIconPainter extends CustomPainter {
   final Suit suit;
   const _SuitIconPainter({required this.suit});
 
-  Color get _color {
-    switch (suit) {
-      case Suit.hearts: return const Color(0xFFE53935);
-      case Suit.diamonds: return const Color(0xFFD81B60);
-      case Suit.spades: return const Color(0xFF5C6BC0);
-      case Suit.clubs: return const Color(0xFF43A047);
-    }
-  }
-
   @override
   void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = _color..style = PaintingStyle.fill;
+    final rect = Offset.zero & size;
     final c = Offset(size.width / 2, size.height / 2);
     final r = size.width * 0.35;
+
+    // Premium radial gradients for a 3D glassmorphic card suit look
+    final Gradient gradient;
     switch (suit) {
       case Suit.hearts:
-        _heart(canvas, c, r, p);
+        gradient = const RadialGradient(
+          colors: [Color(0xFFE53935), Color(0xFF8E0000)],
+          center: Alignment(0, -0.25),
+          radius: 0.85,
+        );
         break;
       case Suit.diamonds:
-        _diamond(canvas, c, r, p);
+        gradient = const RadialGradient(
+          colors: [Color(0xFFFF7043), Color(0xFFD84315)],
+          center: Alignment.center,
+          radius: 0.85,
+        );
         break;
       case Suit.spades:
-        _spade(canvas, c, r, p);
+        gradient = const RadialGradient(
+          colors: [Color(0xFF4E4E4E), Color(0xFF141414)],
+          center: Alignment(0, -0.3),
+          radius: 0.9,
+        );
         break;
       case Suit.clubs:
-        _club(canvas, c, r, p);
+        gradient = const RadialGradient(
+          colors: [Color(0xFF555555), Color(0xFF1D1D1D)],
+          center: Alignment(0, -0.2),
+          radius: 0.9,
+        );
         break;
     }
-  }
 
-  void _heart(Canvas canvas, Offset c, double r, Paint p) {
-    final path = Path();
-    path.moveTo(c.dx, c.dy + r * 0.85);
-    path.cubicTo(c.dx - r * 2.0, c.dy + r * 0.2, c.dx - r * 2.0, c.dy - r * 1.2, c.dx, c.dy - r * 0.35);
-    path.cubicTo(c.dx + r * 2.0, c.dy - r * 1.2, c.dx + r * 2.0, c.dy + r * 0.2, c.dx, c.dy + r * 0.85);
-    path.close();
+    final p = Paint()
+      ..shader = gradient.createShader(rect)
+      ..style = PaintingStyle.fill;
+
+    // Soft blur drop shadow
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.45)
+      ..style = PaintingStyle.fill
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5);
+
+    final Path path;
+    switch (suit) {
+      case Suit.hearts:
+        path = _getHeartPath(c, r);
+        break;
+      case Suit.diamonds:
+        path = _getDiamondPath(c, r);
+        break;
+      case Suit.spades:
+        path = _getSpadePath(c, r);
+        break;
+      case Suit.clubs:
+        path = _getClubPath(c, r);
+        break;
+    }
+
+    // Draw shadow shifted down
+    canvas.drawPath(path.shift(const Offset(0, 1.8)), shadowPaint);
+
+    // Draw body
     canvas.drawPath(path, p);
+
+    // Subtle premium gold outline
+    final borderPaint = Paint()
+      ..color = const Color(0xFFD4AF37).withValues(alpha: 0.5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.85;
+    
+    canvas.drawPath(path, borderPaint);
   }
 
-  void _diamond(Canvas canvas, Offset c, double r, Paint p) {
-    final path = Path()
-      ..moveTo(c.dx, c.dy - r)
-      ..lineTo(c.dx + r * 0.7, c.dy)
-      ..lineTo(c.dx, c.dy + r)
-      ..lineTo(c.dx - r * 0.7, c.dy)
+  Path _getHeartPath(Offset c, double r) {
+    final path = Path();
+    path.moveTo(c.dx, c.dy - r * 0.45);
+    path.cubicTo(c.dx - r * 0.8, c.dy - r * 1.1, c.dx - r * 1.4, c.dy - r * 0.5, c.dx - r * 1.4, c.dy + r * 0.1);
+    path.cubicTo(c.dx - r * 1.4, c.dy + r * 0.65, c.dx - r * 0.6, c.dy + r * 1.05, c.dx, c.dy + r * 1.4);
+    path.cubicTo(c.dx + r * 0.6, c.dy + r * 1.05, c.dx + r * 1.4, c.dy + r * 0.65, c.dx + r * 1.4, c.dy + r * 0.1);
+    path.cubicTo(c.dx + r * 1.4, c.dy - r * 0.5, c.dx + r * 0.8, c.dy - r * 1.1, c.dx, c.dy - r * 0.45);
+    path.close();
+    return path;
+  }
+
+  Path _getDiamondPath(Offset c, double r) {
+    final path = Path();
+    path.moveTo(c.dx, c.dy - r * 1.25);
+    path.cubicTo(c.dx + r * 0.12, c.dy - r * 0.4, c.dx + r * 0.4, c.dy - r * 0.12, c.dx + r * 1.15, c.dy);
+    path.cubicTo(c.dx + r * 0.4, c.dy + r * 0.12, c.dx + r * 0.12, c.dy + r * 0.4, c.dx, c.dy + r * 1.25);
+    path.cubicTo(c.dx - r * 0.12, c.dy + r * 0.4, c.dx - r * 0.4, c.dy + r * 0.12, c.dx - r * 1.15, c.dy);
+    path.cubicTo(c.dx - r * 0.4, c.dy - r * 0.12, c.dx - r * 0.12, c.dy - r * 0.4, c.dx, c.dy - r * 1.25);
+    path.close();
+    return path;
+  }
+
+  Path _getSpadePath(Offset c, double r) {
+    final path = Path();
+    path.moveTo(c.dx, c.dy - r * 1.05);
+    path.cubicTo(c.dx - r * 0.65, c.dy - r * 1.05, c.dx - r * 1.25, c.dy - r * 0.45, c.dx - r * 1.25, c.dy + r * 0.15);
+    path.cubicTo(c.dx - r * 1.25, c.dy + r * 0.65, c.dx - r * 0.65, c.dy + r * 0.85, c.dx, c.dy + r * 0.35);
+    path.cubicTo(c.dx + r * 0.65, c.dy + r * 0.85, c.dx + r * 1.25, c.dy + r * 0.65, c.dx + r * 1.25, c.dy + r * 0.15);
+    path.cubicTo(c.dx + r * 1.25, c.dy - r * 0.45, c.dx + r * 0.65, c.dy - r * 1.05, c.dx, c.dy - r * 1.05);
+    path.close();
+
+    final stem = Path()
+      ..moveTo(c.dx, c.dy + r * 0.25)
+      ..quadraticBezierTo(c.dx - r * 0.08, c.dy + r * 0.75, c.dx - r * 0.45, c.dy + r * 1.15)
+      ..lineTo(c.dx + r * 0.45, c.dy + r * 1.15)
+      ..quadraticBezierTo(c.dx + r * 0.08, c.dy + r * 0.75, c.dx, c.dy + r * 0.25)
       ..close();
-    canvas.drawPath(path, p);
+
+    path.addPath(stem, Offset.zero);
+    return path;
   }
 
-  void _spade(Canvas canvas, Offset c, double r, Paint p) {
+  Path _getClubPath(Offset c, double r) {
     final path = Path();
-    path.moveTo(c.dx, c.dy - r);
-    path.cubicTo(c.dx + r * 2.0, c.dy - r * 0.0, c.dx + r * 2.0, c.dy + r * 0.8, c.dx, c.dy + r * 0.3);
-    path.cubicTo(c.dx - r * 2.0, c.dy + r * 0.8, c.dx - r * 2.0, c.dy - r * 0.0, c.dx, c.dy - r);
-    path.close();
-    canvas.drawPath(path, p);
-    final stemW = r * 0.3;
-    canvas.drawRRect(RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(c.dx, c.dy + r * 0.85), width: stemW, height: r * 0.75),
-        Radius.circular(stemW / 2)), p);
-    canvas.drawCircle(Offset(c.dx - r * 0.45, c.dy + r * 0.85), r * 0.28, p);
-    canvas.drawCircle(Offset(c.dx + r * 0.45, c.dy + r * 0.85), r * 0.28, p);
-  }
+    final double leafR = r * 0.54;
 
-  void _club(Canvas canvas, Offset c, double r, Paint p) {
-    canvas.drawCircle(Offset(c.dx, c.dy - r * 0.55), r * 0.5, p);
-    canvas.drawCircle(Offset(c.dx - r * 0.82, c.dy + r * 0.25), r * 0.5, p);
-    canvas.drawCircle(Offset(c.dx + r * 0.82, c.dy + r * 0.25), r * 0.5, p);
-    final stemW = r * 0.28;
-    canvas.drawRRect(RRect.fromRectAndRadius(
-        Rect.fromCenter(center: Offset(c.dx, c.dy + r * 1.15), width: stemW, height: r * 0.8),
-        Radius.circular(stemW / 2)), p);
-    canvas.drawCircle(Offset(c.dx - r * 0.45, c.dy + r * 1.4), r * 0.28, p);
-    canvas.drawCircle(Offset(c.dx + r * 0.45, c.dy + r * 1.4), r * 0.28, p);
+    path.addOval(Rect.fromCircle(center: Offset(c.dx, c.dy - r * 0.36), radius: leafR));
+    path.addOval(Rect.fromCircle(center: Offset(c.dx - r * 0.48, c.dy + r * 0.22), radius: leafR));
+    path.addOval(Rect.fromCircle(center: Offset(c.dx + r * 0.48, c.dy + r * 0.22), radius: leafR));
+
+    final stem = Path()
+      ..moveTo(c.dx, c.dy + r * 0.1)
+      ..quadraticBezierTo(c.dx - r * 0.08, c.dy + r * 0.75, c.dx - r * 0.45, c.dy + r * 1.15)
+      ..lineTo(c.dx + r * 0.45, c.dy + r * 1.15)
+      ..quadraticBezierTo(c.dx + r * 0.08, c.dy + r * 0.75, c.dx, c.dy + r * 0.1)
+      ..close();
+
+    path.addPath(stem, Offset.zero);
+    return path;
   }
 
   @override

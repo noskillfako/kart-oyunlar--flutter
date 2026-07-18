@@ -17,8 +17,19 @@ class PlayingCardWidget extends StatelessWidget {
     this.raised = false,
   });
 
+  // Asset dosyalarında clubs/spades isimleri takas edilmiş olduğundan
+  // doğru görseli getirmek için suit adını düzeltiyoruz.
+  String get _fixedSuitName {
+    switch (card.suit) {
+      case Suit.clubs:  return 'spades'; // clubs dosyası aslında maça içeriyor
+      case Suit.spades: return 'clubs';  // spades dosyası aslında sinek içeriyor
+      default:          return card.suit.name;
+    }
+  }
+
   // ✅ WebP asset yolu
-  String get _assetPath => 'assets/cards/${card.suit.name}_${card.rank.name}.webp';
+  String get _assetPath => 'assets/cards/${_fixedSuitName}_${card.rank.name}.webp';
+
 
   @override
   Widget build(BuildContext context) {
