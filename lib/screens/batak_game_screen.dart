@@ -121,6 +121,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
               ? Suit.values.firstWhere((s) => s.name == trumpSuitStr)
               : null;
           final declarerId = pub['declarerId'] as String?;
+          debugPrint('BatakGameScreen build edildi. Status: $status, Phase: $phase, CurrentTurnPlayerId: $currentTurnPlayerId, PlayerOrder: $playerOrder');
           final tricksWon = Map<String, dynamic>.from(pub['tricksWon'] ?? {});
           final currentTrickRaw = List<Map<String, dynamic>>.from(pub['currentTrick'] ?? []);
           final currentTrick = currentTrickRaw

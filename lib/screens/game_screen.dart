@@ -95,6 +95,7 @@ class _GameScreenState extends State<GameScreen> {
                 orElse: () => '',
               );
               final myTurn = currentTurnPlayerId == _myUid;
+              debugPrint('GameScreen build edildi. Status: $status, OpponentId: $opponentId, MyTurn: $myTurn, PlayerOrder: $playerOrder');
 
               if (status == 'abandoned') {
                 return _buildAbandonedPanel();

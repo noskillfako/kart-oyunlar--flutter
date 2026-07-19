@@ -177,6 +177,7 @@ class _PistiDemoState extends State<_PistiDemo> {
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
               color: Colors.black.withValues(alpha: 0.15),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Sen tarafı
                   Expanded(
@@ -1536,7 +1537,6 @@ class _AnimCard extends StatelessWidget {
 }
 
 // ─── Suit İkon Painter (Koz seçme ekranı için) ───────────────────────────────
-// ─── Suit İkon Painter (Koz seçme ekranı için) ───────────────────────────────
 class _SuitIconPainter extends CustomPainter {
   final Suit suit;
   const _SuitIconPainter({required this.suit});
@@ -1552,29 +1552,29 @@ class _SuitIconPainter extends CustomPainter {
     switch (suit) {
       case Suit.hearts:
         gradient = const RadialGradient(
-          colors: [Color(0xFFE53935), Color(0xFF8E0000)],
-          center: Alignment(0, -0.25),
+          colors: [Color(0xFFFF1744), Color(0xFF880E4F)],
+          center: Alignment(-0.15, -0.25),
           radius: 0.85,
         );
         break;
       case Suit.diamonds:
         gradient = const RadialGradient(
-          colors: [Color(0xFFFF7043), Color(0xFFD84315)],
-          center: Alignment.center,
+          colors: [Color(0xFFFF5252), Color(0xFFB71C1C)],
+          center: Alignment(-0.15, -0.25),
           radius: 0.85,
         );
         break;
       case Suit.spades:
         gradient = const RadialGradient(
-          colors: [Color(0xFF4E4E4E), Color(0xFF141414)],
-          center: Alignment(0, -0.3),
+          colors: [Color(0xFF555555), Color(0xFF000000)],
+          center: Alignment(-0.15, -0.3),
           radius: 0.9,
         );
         break;
       case Suit.clubs:
         gradient = const RadialGradient(
-          colors: [Color(0xFF555555), Color(0xFF1D1D1D)],
-          center: Alignment(0, -0.2),
+          colors: [Color(0xFF4E4E4E), Color(0xFF0A0A0A)],
+          center: Alignment(-0.15, -0.2),
           radius: 0.9,
         );
         break;
@@ -1586,9 +1586,9 @@ class _SuitIconPainter extends CustomPainter {
 
     // Soft blur drop shadow
     final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.45)
+      ..color = Colors.black.withValues(alpha: 0.6)
       ..style = PaintingStyle.fill
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3.0);
 
     final Path path;
     switch (suit) {
@@ -1606,17 +1606,25 @@ class _SuitIconPainter extends CustomPainter {
         break;
     }
 
-    // Draw shadow shifted down
-    canvas.drawPath(path.shift(const Offset(0, 1.8)), shadowPaint);
+    // 1. Draw shadow shifted down
+    canvas.drawPath(path.shift(const Offset(0, 2.2)), shadowPaint);
 
-    // Draw body
+    // 2. Draw body
     canvas.drawPath(path, p);
 
-    // Subtle premium gold outline
+    // 3. Draw a subtle glossy specular highlight (3D glass reflection)
+    final highlightPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.18)
+      ..style = PaintingStyle.fill;
+    
+    // Draw a small reflection bubble near top left
+    canvas.drawCircle(Offset(c.dx - r * 0.28, c.dy - r * 0.28), r * 0.16, highlightPaint);
+
+    // 4. Subtle premium gold outline (no internal lines due to Path.combine)
     final borderPaint = Paint()
-      ..color = const Color(0xFFD4AF37).withValues(alpha: 0.5)
+      ..color = const Color(0xFFD4AF37).withValues(alpha: 0.65)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.85;
+      ..strokeWidth = 0.95;
     
     canvas.drawPath(path, borderPaint);
   }
@@ -1633,53 +1641,81 @@ class _SuitIconPainter extends CustomPainter {
   }
 
   Path _getDiamondPath(Offset c, double r) {
+    // Classic solid playing card diamond with straight/subtly elegant edges
     final path = Path();
     path.moveTo(c.dx, c.dy - r * 1.25);
-    path.cubicTo(c.dx + r * 0.12, c.dy - r * 0.4, c.dx + r * 0.4, c.dy - r * 0.12, c.dx + r * 1.15, c.dy);
-    path.cubicTo(c.dx + r * 0.4, c.dy + r * 0.12, c.dx + r * 0.12, c.dy + r * 0.4, c.dx, c.dy + r * 1.25);
-    path.cubicTo(c.dx - r * 0.12, c.dy + r * 0.4, c.dx - r * 0.4, c.dy + r * 0.12, c.dx - r * 1.15, c.dy);
-    path.cubicTo(c.dx - r * 0.4, c.dy - r * 0.12, c.dx - r * 0.12, c.dy - r * 0.4, c.dx, c.dy - r * 1.25);
+    path.lineTo(c.dx + r * 0.92, c.dy);
+    path.lineTo(c.dx, c.dy + r * 1.25);
+    path.lineTo(c.dx - r * 0.92, c.dy);
     path.close();
     return path;
   }
 
   Path _getSpadePath(Offset c, double r) {
-    final path = Path();
-    path.moveTo(c.dx, c.dy - r * 1.05);
-    path.cubicTo(c.dx - r * 0.65, c.dy - r * 1.05, c.dx - r * 1.25, c.dy - r * 0.45, c.dx - r * 1.25, c.dy + r * 0.15);
-    path.cubicTo(c.dx - r * 1.25, c.dy + r * 0.65, c.dx - r * 0.65, c.dy + r * 0.85, c.dx, c.dy + r * 0.35);
-    path.cubicTo(c.dx + r * 0.65, c.dy + r * 0.85, c.dx + r * 1.25, c.dy + r * 0.65, c.dx + r * 1.25, c.dy + r * 0.15);
-    path.cubicTo(c.dx + r * 1.25, c.dy - r * 0.45, c.dx + r * 0.65, c.dy - r * 1.05, c.dx, c.dy - r * 1.05);
-    path.close();
+    final head = Path();
+    // Start at a taller sharp tip to remove vertical squashing
+    head.moveTo(c.dx, c.dy - r * 1.3);
+    
+    // Top-left curve to outer left edge
+    head.cubicTo(
+      c.dx - r * 0.4, c.dy - r * 1.25,
+      c.dx - r * 1.1, c.dy - r * 0.75,
+      c.dx - r * 1.15, c.dy - r * 0.05
+    );
+    
+    // Outer left edge down to bottom left lobe
+    head.cubicTo(
+      c.dx - r * 1.2, c.dy + r * 0.45,
+      c.dx - r * 0.6, c.dy + r * 0.85,
+      c.dx, c.dy + r * 0.32
+    );
+    
+    // Bottom right lobe to outer right edge
+    head.cubicTo(
+      c.dx + r * 0.6, c.dy + r * 0.85,
+      c.dx + r * 1.2, c.dy + r * 0.45,
+      c.dx + r * 1.15, c.dy - r * 0.05
+    );
+    
+    // Outer right edge to top tip
+    head.cubicTo(
+      c.dx + r * 1.1, c.dy - r * 0.75,
+      c.dx + r * 0.4, c.dy - r * 1.25,
+      c.dx, c.dy - r * 1.3
+    );
+    head.close();
 
     final stem = Path()
-      ..moveTo(c.dx, c.dy + r * 0.25)
-      ..quadraticBezierTo(c.dx - r * 0.08, c.dy + r * 0.75, c.dx - r * 0.45, c.dy + r * 1.15)
-      ..lineTo(c.dx + r * 0.45, c.dy + r * 1.15)
-      ..quadraticBezierTo(c.dx + r * 0.08, c.dy + r * 0.75, c.dx, c.dy + r * 0.25)
+      ..moveTo(c.dx, c.dy + r * 0.22)
+      ..quadraticBezierTo(c.dx - r * 0.08, c.dy + r * 0.7, c.dx - r * 0.4, c.dy + r * 1.15)
+      ..lineTo(c.dx + r * 0.4, c.dy + r * 1.15)
+      ..quadraticBezierTo(c.dx + r * 0.08, c.dy + r * 0.7, c.dx, c.dy + r * 0.22)
       ..close();
 
-    path.addPath(stem, Offset.zero);
-    return path;
+    // Union combinations to remove internal line overlaps in border painting
+    return Path.combine(PathOperation.union, head, stem);
   }
 
   Path _getClubPath(Offset c, double r) {
-    final path = Path();
-    final double leafR = r * 0.54;
+    final double leafR = r * 0.44; // smaller radius to keep them distinct
 
-    path.addOval(Rect.fromCircle(center: Offset(c.dx, c.dy - r * 0.36), radius: leafR));
-    path.addOval(Rect.fromCircle(center: Offset(c.dx - r * 0.48, c.dy + r * 0.22), radius: leafR));
-    path.addOval(Rect.fromCircle(center: Offset(c.dx + r * 0.48, c.dy + r * 0.22), radius: leafR));
+    // Center offsets are pushed outwards
+    final Path leaf1 = Path()..addOval(Rect.fromCircle(center: Offset(c.dx, c.dy - r * 0.52), radius: leafR));
+    final Path leaf2 = Path()..addOval(Rect.fromCircle(center: Offset(c.dx - r * 0.54, c.dy + r * 0.2), radius: leafR));
+    final Path leaf3 = Path()..addOval(Rect.fromCircle(center: Offset(c.dx + r * 0.54, c.dy + r * 0.2), radius: leafR));
 
-    final stem = Path()
+    final Path stem = Path()
       ..moveTo(c.dx, c.dy + r * 0.1)
-      ..quadraticBezierTo(c.dx - r * 0.08, c.dy + r * 0.75, c.dx - r * 0.45, c.dy + r * 1.15)
-      ..lineTo(c.dx + r * 0.45, c.dy + r * 1.15)
-      ..quadraticBezierTo(c.dx + r * 0.08, c.dy + r * 0.75, c.dx, c.dy + r * 0.1)
+      ..quadraticBezierTo(c.dx - r * 0.08, c.dy + r * 0.7, c.dx - r * 0.4, c.dy + r * 1.15)
+      ..lineTo(c.dx + r * 0.4, c.dy + r * 1.15)
+      ..quadraticBezierTo(c.dx + r * 0.08, c.dy + r * 0.7, c.dx, c.dy + r * 0.1)
       ..close();
 
-    path.addPath(stem, Offset.zero);
-    return path;
+    // Union all parts to construct a single boundary path
+    Path combined = Path.combine(PathOperation.union, leaf1, leaf2);
+    combined = Path.combine(PathOperation.union, combined, leaf3);
+    combined = Path.combine(PathOperation.union, combined, stem);
+    return combined;
   }
 
   @override

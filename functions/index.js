@@ -265,8 +265,11 @@ function batakCalculateScores(order, declarerId, highestBid, tricksWon) {
   order.forEach((id) => {
     if (id === declarerId) return;
     const tricks = tricksWon[id] || 0;
-    scores[id] = tricks * 2;
-    if (tricks === 0) scores[id] -= 10;
+    if (tricks > 0) {
+      scores[id] = tricks * 10;
+    } else {
+      scores[id] = -(highestBid * 10);
+    }
   });
 
   return scores;
@@ -421,9 +424,61 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
       if (pub.currentTrick.length > 0) {
         const ledSuit = pub.currentTrick[0].card.suit;
         const hasLedSuit = hand.some((c) => c.suit === ledSuit);
-        if (hasLedSuit && card.suit !== ledSuit) {
-          tx.update(moveRef, {status: "rejected", reason: "renk-takip-zorunlu"});
-          return;
+        if (hasLedSuit) {
+          if (card.suit !== ledSuit) {
+            tx.update(moveRef, {status: "rejected", reason: "renk-takip-zorunlu"});
+            return;
+          }
+          // Yerdeki en yüksek ledSuit kartını geçmek zorunlu (kart yükseltme)
+          let highestLedCard = null;
+          for (const tc of pub.currentTrick) {
+            if (tc.card.suit === ledSuit) {
+              if (!highestLedCard || RANK_VALUE[tc.card.rank] > RANK_VALUE[highestLedCard.rank]) {
+                highestLedCard = tc.card;
+              }
+            }
+          }
+          if (highestLedCard) {
+            const hasHigherLed = hand.some((c) => c.suit === ledSuit && RANK_VALUE[c.rank] > RANK_VALUE[highestLedCard.rank]);
+            if (hasHigherLed && RANK_VALUE[card.rank] <= RANK_VALUE[highestLedCard.rank]) {
+              tx.update(moveRef, {status: "rejected", reason: "kart-yukseltmek-zorunlu"});
+              return;
+            }
+          }
+        } else {
+          // Renk takip yok, koz çakma durumları
+          const trumpSuit = pub.trumpSuit;
+          if (trumpSuit) {
+            const trumpCards = hand.filter((c) => c.suit === trumpSuit);
+            if (trumpCards.length > 0) {
+              // Yerdeki en büyük kozu bul
+              let highestTrumpCard = null;
+              for (const tc of pub.currentTrick) {
+                if (tc.card.suit === trumpSuit) {
+                  if (!highestTrumpCard || RANK_VALUE[tc.card.rank] > RANK_VALUE[highestTrumpCard.rank]) {
+                    highestTrumpCard = tc.card;
+                  }
+                }
+              }
+
+              // Elinde koz varken koz oynamak zorundasın
+              if (card.suit !== trumpSuit) {
+                tx.update(moveRef, {status: "rejected", reason: "koz-atmak-zorunlu"});
+                return;
+              }
+
+              if (highestTrumpCard) {
+                const hasHigherTrump = trumpCards.some((c) => RANK_VALUE[c.rank] > RANK_VALUE[highestTrumpCard.rank]);
+                if (hasHigherTrump) {
+                  // Daha büyük kozun varsa, onu geçmek zorundasın.
+                  if (RANK_VALUE[card.rank] <= RANK_VALUE[highestTrumpCard.rank]) {
+                    tx.update(moveRef, {status: "rejected", reason: "daha-buyuk-koz-atmak-zorunlu"});
+                    return;
+                  }
+                }
+              }
+            }
+          }
         }
       }
 

@@ -30,7 +30,34 @@ class RoomListScreen extends StatelessWidget {
         child: SafeArea(
           child: StreamBuilder<List<Map<String, dynamic>>>(
             stream: _roomService.watchOpenRooms(gameType: filterGameType),
-            builder: (context, snapshot) {
+            builder: (streamContext, snapshot) {
+              if (snapshot.hasError) {
+                // Hata durumunu ekranda ve konsolda göster (index linki dahil)
+                debugPrint('Firestore Stream Hatası: ${snapshot.error}');
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 48),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Oda listesi yüklenemedi',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Hata: ${snapshot.error}',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: CircularProgressIndicator(color: AppColors.gold),
@@ -72,20 +99,34 @@ class RoomListScreen extends StatelessWidget {
               return ListView.builder(
                 padding: const EdgeInsets.all(16),
                 itemCount: rooms.length,
-                itemBuilder: (context, index) {
+                itemBuilder: (itemContext, index) {
                   final room = rooms[index];
                   return _RoomTile(
                     room: room,
                     onJoin: () async {
-                      await _roomService.joinRoom(room['id']);
-                      if (context.mounted) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                WaitingRoomScreen(roomId: room['id']),
-                          ),
-                        );
+                      try {
+                        debugPrint('Odaya katılma başlatıldı: ${room['id']}');
+                        await _roomService.joinRoom(room['id']);
+                        debugPrint('Odaya katılma başarılı, context.mounted: ${context.mounted}');
+                        if (context.mounted) {
+                          debugPrint('WaitingRoomScreen açılıyor (Parent Context)');
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  WaitingRoomScreen(roomId: room['id']),
+                            ),
+                          );
+                        } else {
+                          debugPrint('HATA: Parent context.mounted false!');
+                        }
+                      } catch (e) {
+                        debugPrint('Odaya katılırken hata oluştu: $e');
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Odaya katılırken hata oluştu: $e')),
+                          );
+                        }
                       }
                     },
                   );

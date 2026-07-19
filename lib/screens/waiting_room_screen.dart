@@ -19,6 +19,12 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
   bool _navigated = false;
   bool _isLeaving = false;
 
+  @override
+  void initState() {
+    super.initState();
+    debugPrint('WaitingRoomScreen initState çağrıldı! RoomId: ${widget.roomId}');
+  }
+
   Future<void> _leaveRoom() async {
     if (_isLeaving) return;
     _isLeaving = true;
@@ -27,6 +33,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('WaitingRoomScreen build metodu tetiklendi. RoomId: ${widget.roomId}');
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
@@ -54,7 +61,13 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
             child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
               stream: _roomService.watchRoom(widget.roomId),
               builder: (context, snapshot) {
+                debugPrint('WaitingRoomScreen StreamBuilder build. ConnectionState: ${snapshot.connectionState}, hasData: ${snapshot.hasData}, hasError: ${snapshot.hasError}');
+                if (snapshot.hasError) {
+                  debugPrint('WaitingRoomScreen Stream Hatası: ${snapshot.error}');
+                }
+
                 if (!snapshot.hasData || !snapshot.data!.exists) {
+                  debugPrint('WaitingRoomScreen: Veri yok veya döküman bulunamadı.');
                   return const Center(
                     child: CircularProgressIndicator(color: AppColors.gold),
                   );
@@ -64,8 +77,10 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                 final players = Map<String, dynamic>.from(data['players'] ?? {});
                 final maxPlayers = data['maxPlayers'] ?? 2;
                 final status = data['status'] ?? 'waiting';
+                debugPrint('WaitingRoomScreen Veri: status=$status, playersCount=${players.length}, maxPlayers=$maxPlayers');
 
                 if (status == 'waiting' && players.length >= maxPlayers) {
+                  debugPrint('WaitingRoomScreen: Oda doldu, oyun başlatılıyor...');
                   _roomService.startGameIfFull(widget.roomId);
                 }
 
@@ -76,8 +91,14 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                     for (final entry in players.entries)
                       entry.key: (entry.value['displayName'] ?? 'Oyuncu') as String,
                   };
+                  debugPrint('Oyun başladı! GameType: $gameType, Oyuncular: $playerNames');
 
                   WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) {
+                      debugPrint('WaitingRoomScreen mounted değil, geçiş yapılmadı!');
+                      return;
+                    }
+                    debugPrint('GameScreen/BatakGameScreen yönlendirmesi yapılıyor, roomId: ${widget.roomId}');
                     Navigator.pushReplacement(
                       context,
                       MaterialPageRoute(
