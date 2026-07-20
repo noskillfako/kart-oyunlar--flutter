@@ -237,7 +237,8 @@ async function maybeDealNextPistiRoundOrFinish(roomId) {
 
 // ============ BATAK MANTIĞI ============
 
-const MIN_BID = 5;
+const MIN_BID = 7;    // Minimum ihale miktarı (demo ile aynı)
+const FORCED_BID = 6; // Herkes pas geçerse zorunlu ihale (demo ile aynı)
 const MAX_BID = 13;
 
 function batakDetermineTrickWinner(trick, trumpSuit) {
@@ -300,6 +301,7 @@ async function initBatakGame(roomId, playerOrder) {
     highestBid: 0,
     currentTurnPlayerId: playerOrder[firstBidderIndex],
     trumpSuit: null,
+    trumpBroken: false,   // Koz kırılma durumu (demo ile aynı)
     declarerId: null,
     currentTrick: [],
     trickLeaderId: null,
@@ -374,9 +376,16 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
       const activeCount = pub.playerOrder.length - newPassed.length;
 
       if (activeCount === 0 && !pub.highestBidderId) {
+        // Herkes pas geçti: dağıtıcının solundaki oyuncuya FORCED_BID (6) kalır (demo ile aynı)
+        const dealerIndex = pub.playerOrder.indexOf(pub.dealerId);
+        const firstBidderId = pub.playerOrder[(dealerIndex + 1) % pub.playerOrder.length];
         tx.update(publicRef, {
-          passedPlayers: newPassed, highestBidderId: pub.dealerId, highestBid: MIN_BID,
-          phase: "chooseTrump", declarerId: pub.dealerId, currentTurnPlayerId: pub.dealerId,
+          passedPlayers: newPassed,
+          highestBidderId: firstBidderId,
+          highestBid: FORCED_BID,
+          phase: "chooseTrump",
+          declarerId: firstBidderId,
+          currentTurnPlayerId: firstBidderId,
         });
       } else if (activeCount <= 1 && pub.highestBidderId) {
         tx.update(publicRef, {
@@ -421,36 +430,62 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
         return;
       }
 
-      if (pub.currentTrick.length > 0) {
+      const trumpSuit = pub.trumpSuit;
+      const trumpBroken = pub.trumpBroken || false;
+
+      if (pub.currentTrick.length === 0) {
+        // ── YENİ EL AÇMA ──
+        // Koz kırılmadan koz ile el açılamaz; elde başka renk varsa koz atma yasak (demo ile aynı)
+        if (trumpSuit && card.suit === trumpSuit && !trumpBroken) {
+          const hasOtherSuits = hand.some((c) => c.suit !== trumpSuit);
+          if (hasOtherSuits) {
+            tx.update(moveRef, {status: "rejected", reason: "koz-kirilmadan-koz-atamazsin"});
+            return;
+          }
+        }
+      } else {
+        // ── MEVCUT ELE KART EKLEME ──
         const ledSuit = pub.currentTrick[0].card.suit;
         const hasLedSuit = hand.some((c) => c.suit === ledSuit);
+
         if (hasLedSuit) {
+          // Renk takip zorunluluğu — o renkte herhangi bir kartı oynayabilirsin
           if (card.suit !== ledSuit) {
             tx.update(moveRef, {status: "rejected", reason: "renk-takip-zorunlu"});
             return;
           }
-          // Yerdeki en yüksek ledSuit kartını geçmek zorunlu (kart yükseltme)
-          let highestLedCard = null;
-          for (const tc of pub.currentTrick) {
-            if (tc.card.suit === ledSuit) {
-              if (!highestLedCard || RANK_VALUE[tc.card.rank] > RANK_VALUE[highestLedCard.rank]) {
-                highestLedCard = tc.card;
+          // Kart yükseltme: trick'te koz yoksa büyük oynamak zorunlu
+          const trumpInTrick = trumpSuit
+            ? pub.currentTrick.some((tc) => tc.card.suit === trumpSuit)
+            : false;
+          if (!trumpInTrick) {
+            let highestLedCard = null;
+            for (const tc of pub.currentTrick) {
+              if (tc.card.suit === ledSuit) {
+                if (!highestLedCard || RANK_VALUE[tc.card.rank] > RANK_VALUE[highestLedCard.rank]) {
+                  highestLedCard = tc.card;
+                }
+              }
+            }
+            if (highestLedCard) {
+              const hasHigherLed = hand.some((c) => c.suit === ledSuit && RANK_VALUE[c.rank] > RANK_VALUE[highestLedCard.rank]);
+              if (hasHigherLed && RANK_VALUE[card.rank] <= RANK_VALUE[highestLedCard.rank]) {
+                tx.update(moveRef, {status: "rejected", reason: "kart-yukseltmek-zorunlu"});
+                return;
               }
             }
           }
-          if (highestLedCard) {
-            const hasHigherLed = hand.some((c) => c.suit === ledSuit && RANK_VALUE[c.rank] > RANK_VALUE[highestLedCard.rank]);
-            if (hasHigherLed && RANK_VALUE[card.rank] <= RANK_VALUE[highestLedCard.rank]) {
-              tx.update(moveRef, {status: "rejected", reason: "kart-yukseltmek-zorunlu"});
-              return;
-            }
-          }
+          // NOT: Kart yükseltme zorunluluğu standart Batak kuralı değildir, kaldırıldı.
         } else {
-          // Renk takip yok, koz çakma durumları
-          const trumpSuit = pub.trumpSuit;
+          // Renk yoksa → koz çakma durumları (demo ile aynı)
           if (trumpSuit) {
             const trumpCards = hand.filter((c) => c.suit === trumpSuit);
             if (trumpCards.length > 0) {
+              // Elinde koz varken başka renk atamazsın
+              if (card.suit !== trumpSuit) {
+                tx.update(moveRef, {status: "rejected", reason: "koz-atmak-zorunlu"});
+                return;
+              }
               // Yerdeki en büyük kozu bul
               let highestTrumpCard = null;
               for (const tc of pub.currentTrick) {
@@ -460,23 +495,15 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
                   }
                 }
               }
-
-              // Elinde koz varken koz oynamak zorundasın
-              if (card.suit !== trumpSuit) {
-                tx.update(moveRef, {status: "rejected", reason: "koz-atmak-zorunlu"});
-                return;
-              }
-
               if (highestTrumpCard) {
+                // Yerde zaten koz var; daha büyük kozun varsa onu geçmek zorundasın
                 const hasHigherTrump = trumpCards.some((c) => RANK_VALUE[c.rank] > RANK_VALUE[highestTrumpCard.rank]);
-                if (hasHigherTrump) {
-                  // Daha büyük kozun varsa, onu geçmek zorundasın.
-                  if (RANK_VALUE[card.rank] <= RANK_VALUE[highestTrumpCard.rank]) {
-                    tx.update(moveRef, {status: "rejected", reason: "daha-buyuk-koz-atmak-zorunlu"});
-                    return;
-                  }
+                if (hasHigherTrump && RANK_VALUE[card.rank] <= RANK_VALUE[highestTrumpCard.rank]) {
+                  tx.update(moveRef, {status: "rejected", reason: "daha-buyuk-koz-atmak-zorunlu"});
+                  return;
                 }
               }
+              // highestTrumpCard === null → yerde henüz koz yok, ilk çakışı yapıyorsun (geçerli)
             }
           }
         }
@@ -487,12 +514,15 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
       const newTrick = [...pub.currentTrick, {playerId, card}];
       const handCounts = {...pub.handCounts, [playerId]: newHand.length};
 
+      // Koz kırılma takibi: oynanan kart kozsa trumpBroken true olur (demo ile aynı)
+      const newTrumpBroken = trumpBroken || (trumpSuit && card.suit === trumpSuit);
+
       tx.update(handRef, {cards: newHand});
 
       if (newTrick.length < pub.playerOrder.length) {
         const nextIndex = (pub.playerOrder.indexOf(playerId) + 1) % pub.playerOrder.length;
         tx.update(publicRef, {
-          currentTrick: newTrick, handCounts,
+          currentTrick: newTrick, handCounts, trumpBroken: newTrumpBroken,
           currentTurnPlayerId: pub.playerOrder[nextIndex],
         });
         tx.update(moveRef, {status: "applied"});
@@ -511,6 +541,7 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
         tx.update(publicRef, {
           currentTrick: [], handCounts, tricksWon: newTricksWon,
           trickLeaderId: winnerId, currentTurnPlayerId: winnerId,
+          trumpBroken: newTrumpBroken,
           phase: "finished", status: "finished", scores,
         });
         tx.update(db.doc(`rooms/${roomId}`), {status: "finished"});
@@ -518,6 +549,7 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
         tx.update(publicRef, {
           currentTrick: [], handCounts, tricksWon: newTricksWon,
           trickLeaderId: winnerId, currentTurnPlayerId: winnerId,
+          trumpBroken: newTrumpBroken,
         });
       }
       tx.update(moveRef, {status: "applied"});
@@ -527,12 +559,46 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
 
 // ============ FIRESTORE TETİKLEYİCİLERİ ============
 
+/**
+ * Bir collection'daki tüm document'ları siler.
+ */
+async function deleteCollection(colRef, batchSize = 50) {
+  const snap = await colRef.limit(batchSize).get();
+  if (snap.empty) return;
+  const batch = db.batch();
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
+  if (snap.size === batchSize) await deleteCollection(colRef, batchSize);
+}
+
+/**
+ * Oda ve tüm alt-koleksiyonlarını siler.
+ */
+async function deleteRoom(roomId) {
+  // Alt koleksiyonları sil
+  await deleteCollection(db.collection(`rooms/${roomId}/gameState`));
+  await deleteCollection(db.collection(`rooms/${roomId}/hands`));
+  await deleteCollection(db.collection(`rooms/${roomId}/moves`));
+  // Oda belgesini sil
+  await db.doc(`rooms/${roomId}`).delete();
+  console.log(`Oda silindi: ${roomId}`);
+}
+
 exports.onRoomStatusChange = onDocumentUpdated("rooms/{roomId}", async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
   const roomId = event.params.roomId;
 
   if (before.status === after.status) return;
+
+  // Oyun tamamlandı → 30 saniye bekle, sonra odayı sil
+  if (after.status === "finished") {
+    await new Promise((r) => setTimeout(r, 30_000));
+    await deleteRoom(roomId);
+    return;
+  }
+
+  // Oyun başladı → oyunu başlat
   if (after.status !== "playing") return;
 
   const publicRef = db.doc(`rooms/${roomId}/gameState/public`);

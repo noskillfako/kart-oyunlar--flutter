@@ -42,6 +42,13 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
 
   String _nameOf(String uid) => widget.playerNames[uid] ?? 'Oyuncu';
 
+  // Kart değeri hesabı (iki=0 ... as=12)
+  static const _rankOrder = [
+    Rank.two, Rank.three, Rank.four, Rank.five, Rank.six, Rank.seven,
+    Rank.eight, Rank.nine, Rank.ten, Rank.jack, Rank.queen, Rank.king, Rank.ace,
+  ];
+  int _rankVal(Rank r) => _rankOrder.indexOf(r);
+
   String _suitName(Suit suit) {
     switch (suit) {
       case Suit.hearts:
@@ -127,6 +134,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
           final currentTrick = currentTrickRaw
               .map((t) => _TrickEntry(t['playerId'], PlayingCard.fromMap(t['card'])))
               .toList();
+          final trumpBroken = pub['trumpBroken'] as bool? ?? false;
 
           // Trick tamamlanma durumunu takip et (state değişikliği build sırasında,
           // sadece Timer'ın kendisi setState tetikler)
@@ -164,7 +172,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
                       case 'playing':
                         return _buildPlayingUI(
                           myHand, currentTrick, trumpSuit, declarerId,
-                          highestBid, currentTurnPlayerId, playerOrder,
+                          highestBid, currentTurnPlayerId, playerOrder, trumpBroken,
                         );
                       default:
                         return const SizedBox.shrink();
@@ -464,6 +472,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     int highestBid,
     String? currentTurnPlayerId,
     List<String> playerOrder,
+    bool trumpBroken,
   ) {
     final myTurn = currentTurnPlayerId == _myUid;
     final waitingToStartNewTrick = myTurn && currentTrick.length == 4;
@@ -516,7 +525,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
             myTurn ? 'Senin sıran' : '${_nameOf(currentTurnPlayerId ?? '')} oynuyor...',
             myTurn,
           ),
-        Expanded(child: _myHand2Rows(myHand, myTurn, currentTrick)),
+        Expanded(child: _myHand2Rows(myHand, myTurn, currentTrick, trumpSuit, trumpBroken)),
         const SizedBox(height: 6),
       ],
     );
@@ -636,7 +645,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     );
   }
 
-  Widget _myHand2Rows(List<PlayingCard> hand, bool myTurn, List<_TrickEntry> currentTrick) {
+  Widget _myHand2Rows(List<PlayingCard> hand, bool myTurn, List<_TrickEntry> currentTrick, Suit? trumpSuit, bool trumpBroken) {
     if (hand.isEmpty) return const SizedBox.shrink();
     final sorted = List<PlayingCard>.from(hand)
       ..sort((a, b) => a.suit != b.suit
@@ -645,28 +654,76 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     final mid = (sorted.length / 2).ceil();
     final topRow = sorted.sublist(0, mid);
     final botRow = sorted.sublist(mid);
-    final ledSuit = (currentTrick.isNotEmpty && currentTrick.length < 4)
-        ? currentTrick.first.card.suit
-        : null;
-    final hasLedSuitInHand = ledSuit != null && hand.any((c) => c.suit == ledSuit);
+
+    // ── Tüm geçersiz kart ID'lerini hesapla ──
+    final invalidIds = <String>{};
+    if (myTurn) {
+      // Aktif trick (tamamlanmışsa sayılmaz)
+      final activeTrick = (currentTrick.isNotEmpty && currentTrick.length < 4)
+          ? currentTrick
+          : const <_TrickEntry>[];
+      final ledSuit = activeTrick.isNotEmpty ? activeTrick.first.card.suit : null;
+      final hasLedSuit = ledSuit != null && hand.any((c) => c.suit == ledSuit);
+      final isOpeningTrick = activeTrick.isEmpty;
+      final trumpInTrick = trumpSuit != null &&
+          activeTrick.any((tc) => tc.card.suit == trumpSuit);
+
+      // Kural 1: Renk takip
+      if (hasLedSuit) {
+        for (final c in hand) {
+          if (c.suit != ledSuit) invalidIds.add(c.id);
+        }
+      }
+
+      // Kural 2: Koz kırılmadan koz ile el açılamaz
+      if (isOpeningTrick && !trumpBroken && trumpSuit != null
+          && hand.any((c) => c.suit != trumpSuit)) {
+        for (final c in hand) {
+          if (c.suit == trumpSuit) invalidIds.add(c.id);
+        }
+      }
+
+      // Kural 3: Kart yükseltme — sadece trick'te koz yoksa
+      if (hasLedSuit && !trumpInTrick && ledSuit != null) {
+        // Trick'teki en yüksek led suit kartını bul
+        PlayingCard? highestLed;
+        for (final tc in activeTrick) {
+          if (tc.card.suit == ledSuit) {
+            if (highestLed == null || _rankVal(tc.card.rank) > _rankVal(highestLed.rank)) {
+              highestLed = tc.card;
+            }
+          }
+        }
+        if (highestLed != null) {
+          final ledCardsInHand = hand.where((c) => c.suit == ledSuit).toList();
+          final hasHigher = ledCardsInHand.any((c) => _rankVal(c.rank) > _rankVal(highestLed!.rank));
+          if (hasHigher) {
+            // Elde daha büyüğü varken küçüğü oynamak yasak
+            for (final c in ledCardsInHand) {
+              if (_rankVal(c.rank) <= _rankVal(highestLed.rank)) invalidIds.add(c.id);
+            }
+          }
+        }
+      }
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _fanRow(topRow, myTurn, ledSuit, hasLedSuitInHand),
+          _fanRow(topRow, myTurn, invalidIds),
           const SizedBox(height: 4),
-          _fanRow(botRow, myTurn, ledSuit, hasLedSuitInHand),
+          _fanRow(botRow, myTurn, invalidIds),
         ],
       ),
     );
   }
 
-  Widget _fanRow(List<PlayingCard> cards, bool myTurn, Suit? ledSuit, bool hasLedSuitInHand) {
+  Widget _fanRow(List<PlayingCard> cards, bool myTurn, Set<String> invalidIds) {
     const cardW = 52.0;
     const cardH = 72.0;
-    const liftH = 8.0;
+    const liftH = 18.0;
     final n = cards.length;
     if (n == 0) return const SizedBox.shrink();
 
@@ -685,7 +742,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
           children: [
             for (int i = n - 1; i >= 0; i--) () {
               final card = cards[i];
-              final isInvalid = myTurn && hasLedSuitInHand && card.suit != ledSuit;
+              final isInvalid = invalidIds.contains(card.id);
               final canPlay = myTurn && _playingCardId == null && !isInvalid;
               final playing = _playingCardId == card.id;
 
@@ -693,16 +750,30 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
                 left: i * step,
                 bottom: canPlay ? liftH : 0.0,
                 child: AnimatedOpacity(
-                  opacity: playing ? 0.0 : (isInvalid ? 0.25 : 1.0),
+                  opacity: playing ? 0.0 : (isInvalid ? 0.22 : 1.0),
                   duration: const Duration(milliseconds: 150),
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: (canPlay && !playing) ? () => _playCard(card) : null,
-                    child: PlayingCardWidget(
-                      card: card,
-                      width: cardW,
-                      height: cardH,
-                      raised: canPlay && !playing,
+                    child: Container(
+                      decoration: (canPlay && !playing)
+                          ? BoxDecoration(
+                              borderRadius: BorderRadius.circular(5),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: AppColors.gold.withValues(alpha: 0.75),
+                                  blurRadius: 14,
+                                  spreadRadius: 3,
+                                ),
+                              ],
+                            )
+                          : null,
+                      child: PlayingCardWidget(
+                        card: card,
+                        width: cardW,
+                        height: cardH,
+                        raised: canPlay && !playing,
+                      ),
                     ),
                   ),
                 ),

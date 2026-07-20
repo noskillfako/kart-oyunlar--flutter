@@ -86,23 +86,25 @@ class BatakEngine implements GameEngine<BatakGameState, BatakMove> {
           final ledCards = hand.where((c) => c.suit == ledSuit).toList();
 
           if (ledCards.isNotEmpty) {
-            // Renk takip zorunluluğu
+            // Renk takip zorunluluğu — o renkte herhangi bir kartı oynayabilirsin
             if (card.suit != ledSuit) return false;
-
-            // Kart yükseltme zorunluluğu (yerdeki en büyük ledSuit kartını geçmek)
-            PlayingCard? highestLedCard;
-            for (final tc in state.currentTrick) {
-              if (tc.card.suit == ledSuit) {
-                if (highestLedCard == null || _rankValue(tc.card.rank) > _rankValue(highestLedCard.rank)) {
-                  highestLedCard = tc.card;
+            // Kart yükseltme: trick'te koz yoksa büyük oynamak zorunlu
+            final trumpInTrick = state.trumpSuit != null &&
+                state.currentTrick.any((tc) => tc.card.suit == state.trumpSuit);
+            if (!trumpInTrick) {
+              PlayingCard? highestLedCard;
+              for (final tc in state.currentTrick) {
+                if (tc.card.suit == ledSuit) {
+                  if (highestLedCard == null || _rankValue(tc.card.rank) > _rankValue(highestLedCard.rank)) {
+                    highestLedCard = tc.card;
+                  }
                 }
               }
-            }
-
-            if (highestLedCard != null) {
-              final hasHigherLedCard = ledCards.any((c) => _rankValue(c.rank) > _rankValue(highestLedCard!.rank));
-              if (hasHigherLedCard && _rankValue(card.rank) <= _rankValue(highestLedCard.rank)) {
-                return false;
+              if (highestLedCard != null) {
+                final hasHigherLedCard = ledCards.any((c) => _rankValue(c.rank) > _rankValue(highestLedCard!.rank));
+                if (hasHigherLedCard && _rankValue(card.rank) <= _rankValue(highestLedCard.rank)) {
+                  return false;
+                }
               }
             }
           } else {
