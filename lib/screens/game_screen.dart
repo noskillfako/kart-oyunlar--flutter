@@ -119,18 +119,14 @@ class _GameScreenState extends State<GameScreen> {
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) async {
-        if (_myUid != null) {
-          await _roomService.leaveRoom(widget.roomId);
-        }
+        await _roomService.leaveRoom(widget.roomId);
       },
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () async {
-              if (_myUid != null) {
-                await _roomService.leaveRoom(widget.roomId);
-              }
+              await _roomService.leaveRoom(widget.roomId);
               if (context.mounted) Navigator.pop(context);
             },
           ),
@@ -187,7 +183,7 @@ class _GameScreenState extends State<GameScreen> {
                     final currentTurnPlayerId = pub['currentTurnPlayerId'] as String?;
                     final botControlledSeats = List<String>.from(pub['botControlledSeats'] ?? (roomData?['botControlledSeats'] ?? []));
                     
-                    if (_myUid != null && botControlledSeats.contains(_myUid)) {
+                    if (botControlledSeats.contains(_myUid)) {
                       _roomService.reclaimSeat(widget.roomId, _myUid);
                     }
 
@@ -196,11 +192,9 @@ class _GameScreenState extends State<GameScreen> {
                     final playerOrder = List<String>.from(pub['playerOrder'] ?? []);
                     final handCounts = Map<String, dynamic>.from(pub['handCounts'] ?? {});
                     final pistiCounts = Map<String, dynamic>.from(pub['pistiCounts'] ?? {});
-                    final collectedCardCounts = pub['collectedCardCounts'] as Map<String, dynamic>?;
                     final currentScores = pub['currentScores'] as Map<String, dynamic>?;
                     final tableCardsRaw = List<Map<String, dynamic>>.from(pub['tableCards'] ?? []);
                     final tableCards = tableCardsRaw.map((c) => PlayingCard.fromMap(c)).toList();
-                    final deckCount = pub['deckCount'] ?? 0;
 
                     final opponentId = playerOrder.firstWhere(
                       (id) => id != _myUid,
@@ -282,7 +276,7 @@ class _GameScreenState extends State<GameScreen> {
                               } else if (isStale) {
                                 bannerText = '⚠️ $opponentName oyundan çıktı / bağlantısı koptu (Bot devralacak)...';
                                 bannerColor = Colors.orange.shade800;
-                                if (lastActiveMs != null && nowMs - lastActiveMs > 10000) {
+                                if (nowMs - lastActiveMs > 10000) {
                                   _roomService.claimBotTakeover(widget.roomId, opponentId);
                                 }
                               }
@@ -541,34 +535,7 @@ class _GameScreenState extends State<GameScreen> {
     );
   }
 
-  Widget _deckChip(int count) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        children: [
-          const Text(
-            'DESTE',
-            style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            '$count',
-            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 1),
-          const Text(
-            'Kalan',
-            style: TextStyle(color: Colors.white30, fontSize: 8),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildAbandonedPanel(String opponentName) {
     return Center(

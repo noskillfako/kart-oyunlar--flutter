@@ -182,9 +182,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) async {
-        if (_myUid != null) {
-          await _roomService.leaveRoom(widget.roomId);
-        }
+        await _roomService.leaveRoom(widget.roomId);
       },
       child: Scaffold(
         backgroundColor: AppColors.deepGreen,
@@ -192,9 +190,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () async {
-              if (_myUid != null) {
-                await _roomService.leaveRoom(widget.roomId);
-              }
+              await _roomService.leaveRoom(widget.roomId);
               if (context.mounted) Navigator.pop(context);
             },
           ),
@@ -218,7 +214,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
             final currentTurnPlayerId = pub['currentTurnPlayerId'] as String?;
             final botControlledSeats = List<String>.from(pub['botControlledSeats'] ?? []);
 
-            if (_myUid != null && botControlledSeats.contains(_myUid)) {
+            if (botControlledSeats.contains(_myUid)) {
               _roomService.reclaimSeat(widget.roomId, _myUid);
             }
 
@@ -294,7 +290,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
                       } else if (isStale) {
                         bannerText = '⚠️ $oppName oyundan çıktı / bağlantısı koptu...';
                         bannerColor = Colors.orange.shade800;
-                        if (lastActiveMs != null && nowMs - lastActiveMs > 10000) {
+                        if (nowMs - lastActiveMs > 10000) {
                           _roomService.claimBotTakeover(widget.roomId, activeTurnOpponentId);
                         }
                       }
@@ -873,7 +869,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
       }
 
       // Kural 3: Kart yükseltme — sadece trick'te koz yoksa
-      if (hasLedSuit && !trumpInTrick && ledSuit != null) {
+      if (hasLedSuit && !trumpInTrick) {
         // Trick'teki en yüksek led suit kartını bul
         PlayingCard? highestLed;
         for (final tc in activeTrick) {
