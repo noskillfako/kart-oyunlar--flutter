@@ -46,6 +46,39 @@ void main() {
       final doc = await fakeFirestore.collection('rooms').doc(roomId).get();
       expect(doc.data()!['maxPlayers'], 4);
     });
+
+    test('totalRounds doğru şekilde kaydedilir', () async {
+      final roomId = await roomService.createRoom(totalRounds: 5);
+      final doc = await fakeFirestore.collection('rooms').doc(roomId).get();
+      expect(doc.data()!['totalRounds'], 5);
+    });
+  });
+
+  group('startGame', () {
+    test('oda doluysa ve çağıran kişi host ise oyunu "playing" durumuna geçirir', () async {
+      final roomId = await roomService.createRoom(maxPlayers: 2);
+
+      final secondUser = MockUser(uid: 'player2', displayName: 'Mehmet');
+      final secondAuth = MockFirebaseAuth(mockUser: secondUser, signedIn: true);
+      final secondService = RoomService(firestore: fakeFirestore, auth: secondAuth);
+      await secondService.joinRoom(roomId);
+
+      await roomService.startGame(roomId);
+
+      final doc = await fakeFirestore.collection('rooms').doc(roomId).get();
+      expect(doc.data()!['status'], 'playing');
+    });
+
+    test('host olmayan kişi startGame çağırdığında hata fırlatır', () async {
+      final roomId = await roomService.createRoom(maxPlayers: 2);
+
+      final secondUser = MockUser(uid: 'player2', displayName: 'Mehmet');
+      final secondAuth = MockFirebaseAuth(mockUser: secondUser, signedIn: true);
+      final secondService = RoomService(firestore: fakeFirestore, auth: secondAuth);
+      await secondService.joinRoom(roomId);
+
+      expect(() => secondService.startGame(roomId), throwsA(isA<Exception>()));
+    });
   });
 
   group('joinRoom', () {
@@ -104,6 +137,57 @@ void main() {
 
       final doc = await fakeFirestore.collection('rooms').doc(roomId).get();
       expect(doc.data()!['hostId'], 'player2');
+    });
+
+    test('oyun devam ederken biri ayrılırsa oyuncu botControlledSeats listesine eklenir', () async {
+      final roomId = await roomService.createRoom(maxPlayers: 2);
+
+      final secondUser = MockUser(uid: 'player2', displayName: 'Mehmet');
+      final secondAuth = MockFirebaseAuth(mockUser: secondUser, signedIn: true);
+      final secondService = RoomService(firestore: fakeFirestore, auth: secondAuth);
+      await secondService.joinRoom(roomId);
+      await roomService.startGame(roomId);
+
+      await secondService.leaveRoom(roomId); // player2 ayrılıyor
+
+      final doc = await fakeFirestore.collection('rooms').doc(roomId).get();
+      expect(doc.data()!['status'], 'playing');
+      final botSeats = List<String>.from(doc.data()!['botControlledSeats'] ?? []);
+      expect(botSeats.contains('player2'), true);
+    });
+
+    test('oyun devam ederken tüm oyuncular ayrılırsa status abandoned olur', () async {
+      final roomId = await roomService.createRoom(maxPlayers: 2);
+
+      final secondUser = MockUser(uid: 'player2', displayName: 'Mehmet');
+      final secondAuth = MockFirebaseAuth(mockUser: secondUser, signedIn: true);
+      final secondService = RoomService(firestore: fakeFirestore, auth: secondAuth);
+      await secondService.joinRoom(roomId);
+      await roomService.startGame(roomId);
+
+      await roomService.leaveRoom(roomId); // player1 ayrılıyor
+      await secondService.leaveRoom(roomId); // player2 ayrılıyor
+
+      final doc = await fakeFirestore.collection('rooms').doc(roomId).get();
+      expect(doc.exists, false);
+    });
+
+    test('reclaimSeat oyuncuyu botControlledSeats listesinden çıkarır', () async {
+      final roomId = await roomService.createRoom(maxPlayers: 2);
+      await fakeFirestore.collection('rooms').doc(roomId).update({
+        'players.user_456': {'displayName': 'Oyuncu 2'},
+      });
+      await roomService.claimBotTakeover(roomId, 'user_123');
+
+      final docBefore = await fakeFirestore.collection('rooms').doc(roomId).get();
+      final seatsBefore = List<String>.from(docBefore.data()?['botControlledSeats'] ?? []);
+      expect(seatsBefore.contains('user_123'), true);
+
+      await roomService.reclaimSeat(roomId, 'user_123');
+
+      final docAfter = await fakeFirestore.collection('rooms').doc(roomId).get();
+      final seatsAfter = List<String>.from(docAfter.data()?['botControlledSeats'] ?? []);
+      expect(seatsAfter.contains('user_123'), false);
     });
   });
 

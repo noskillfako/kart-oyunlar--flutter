@@ -94,6 +94,37 @@ class AuthService {
     }
   }
 
+  /// Mevcut anonim hesabı bağlamadan doğrudan Google hesabıyla giriş yapar.
+  ///
+  /// — Bu Google hesabı daha önce Firebase'e bağlanmışsa → o ESKİ UID'ye geçer,
+  ///   kullanıcı eski profil/istatistiklerine kavuşur.
+  /// — Daha önce bağlanmamış yeni bir Google hesabıysa → yeni bir Firebase
+  ///   kullanıcısı oluşturulur ve mevcut anonim UID terk edilir.
+  ///
+  /// UI katmanı bu çağrıdan önce kullanıcıyı uyarmalıdır (misafir verisi kaybolabilir).
+  Future<AuthLinkResult> signInWithGoogle() async {
+    try {
+      final googleUser = await _googleSignIn.signIn();
+      if (googleUser == null) {
+        return AuthLinkResult.cancelled();
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // linkWithCredential değil, signInWithCredential — UID değişebilir
+      final result = await _auth.signInWithCredential(credential);
+      return AuthLinkResult.success(result.user);
+    } on FirebaseAuthException catch (e) {
+      return AuthLinkResult.error(e.message ?? 'Beklenmeyen bir hata oluştu.');
+    } catch (e) {
+      return AuthLinkResult.error('Giriş sırasında bir hata oluştu.');
+    }
+  }
+
   Future<void> signOut() async {
     await _googleSignIn.signOut();
     await _auth.signOut();

@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
+import 'services/user_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,6 +13,9 @@ void main() async {
 
   // Uygulama açılır açılmaz anonim giriş yap
   await AuthService().signInAnonymously();
+
+  // Firestore'da profil yoksa ilk girişte oluştur
+  await UserService().ensureProfileExists();
 
   runApp(const MyApp());
 }

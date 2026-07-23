@@ -1,7 +1,7 @@
 const {setGlobalOptions} = require("firebase-functions/v2");
-const {onDocumentUpdated, onDocumentCreated} = require("firebase-functions/v2/firestore");
+const {onDocumentUpdated, onDocumentCreated, onDocumentDeleted} = require("firebase-functions/v2/firestore");
 const {initializeApp} = require("firebase-admin/app");
-const {getFirestore} = require("firebase-admin/firestore");
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 
 initializeApp();
 const db = getFirestore();
@@ -80,7 +80,7 @@ function pistiCalculateScores(order, collectedCards, pistiCounts) {
   return scores;
 }
 
-async function initPistiGame(roomId, playerOrder) {
+async function initPistiGame(roomId, playerOrder, totalRounds) {
   const deck = shuffle(buildDeck());
   const hands = {};
   for (const uid of playerOrder) hands[uid] = deck.splice(0, 4);
@@ -97,6 +97,13 @@ async function initPistiGame(roomId, playerOrder) {
     playerOrder,
     handCounts: Object.fromEntries(playerOrder.map((id) => [id, 4])),
     pistiCounts: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+    collectedCardCounts: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+    currentScores: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+    cumulativeScores: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+    roundHistory: [],
+    roundReady: Object.fromEntries(playerOrder.map((id) => [id, false])),
+    currentRound: 1,
+    totalRounds: totalRounds || 1,
     lastCollectorId: null,
     deckCount: deck.length,
     status: "playing",
@@ -147,6 +154,7 @@ async function handlePistiMove(roomId, playerId, cardPlayed, moveRef) {
     collectedCards[playerId] = [...(collectedCards[playerId] || [])];
     const pistiCounts = {...pub.pistiCounts};
     const handCounts = {...pub.handCounts};
+    const collectedCardCounts = {...pub.collectedCardCounts};
 
     const tableWasSingle = tableCards.length === 1;
     const topCard = tableCards.length > 0 ? tableCards[tableCards.length - 1] : null;
@@ -156,6 +164,7 @@ async function handlePistiMove(roomId, playerId, cardPlayed, moveRef) {
 
     if (tableCards.length > 0 && (isJack || isMatch)) {
       collectedCards[playerId].push(...tableCards, cardPlayed);
+      collectedCardCounts[playerId] = (collectedCardCounts[playerId] || 0) + tableCards.length + 1;
       lastCollectorId = playerId;
       if (isMatch && tableWasSingle) {
         pistiCounts[playerId] = (pistiCounts[playerId] || 0) + 1;
@@ -170,10 +179,14 @@ async function handlePistiMove(roomId, playerId, cardPlayed, moveRef) {
     const nextPlayerId = order[(idx + 1) % order.length];
     handCounts[playerId] = newHand.length;
 
+    // Calculate current scores dynamically based on the current collected cards & pistis
+    const currentScores = pistiCalculateScores(order, collectedCards, pistiCounts);
+
     tx.update(handRef, {cards: newHand});
     tx.update(publicRef, {
       tableCards, currentTurnPlayerId: nextPlayerId,
       pistiCounts, handCounts, lastCollectorId,
+      collectedCardCounts, currentScores,
     });
     tx.update(privateRef, {collectedCards});
     tx.update(moveRef, {status: "applied"});
@@ -220,18 +233,61 @@ async function maybeDealNextPistiRoundOrFinish(roomId) {
 
     let tableCards = [...pub.tableCards];
     const collectedCards = {...priv.collectedCards};
+    const collectedCardCounts = {...pub.collectedCardCounts};
     if (tableCards.length > 0 && pub.lastCollectorId) {
       collectedCards[pub.lastCollectorId] = [
         ...(collectedCards[pub.lastCollectorId] || []), ...tableCards,
       ];
+      collectedCardCounts[pub.lastCollectorId] = (collectedCardCounts[pub.lastCollectorId] || 0) + tableCards.length;
       tableCards = [];
     }
 
     const scores = pistiCalculateScores(order, collectedCards, pub.pistiCounts);
 
-    tx.update(publicRef, {tableCards, status: "finished", scores});
-    tx.update(privateRef, {collectedCards});
-    tx.update(db.doc(`rooms/${roomId}`), {status: "finished"});
+    const cumulativeScores = {...pub.cumulativeScores};
+    order.forEach((id) => {
+      cumulativeScores[id] = (cumulativeScores[id] || 0) + (scores[id] || 0);
+    });
+
+    const roundHistory = [...(pub.roundHistory || [])];
+    roundHistory.push({
+      round: pub.currentRound,
+      scores: scores,
+    });
+
+    const isLastRound = pub.currentRound >= pub.totalRounds;
+
+    if (isLastRound) {
+      const botSeats = pub.botControlledSeats || [];
+      const realPlayers = order.filter((id) => !botSeats.includes(id));
+      const rankingSource = realPlayers.length > 0 ? realPlayers : order;
+      const finalRanking = [...rankingSource].sort((a, b) => (cumulativeScores[b] || 0) - (cumulativeScores[a] || 0));
+
+      tx.update(publicRef, {
+        tableCards,
+        status: "matchFinished",
+        scores,
+        collectedCardCounts,
+        currentScores: scores,
+        cumulativeScores,
+        roundHistory,
+        finalRanking,
+      });
+      tx.update(privateRef, {collectedCards});
+      tx.update(db.doc(`rooms/${roomId}`), {status: "finished"});
+    } else {
+      tx.update(publicRef, {
+        tableCards,
+        status: "roundFinished",
+        scores,
+        collectedCardCounts,
+        currentScores: scores,
+        cumulativeScores,
+        roundHistory,
+        roundReady: Object.fromEntries(order.map((id) => [id, false])),
+      });
+      tx.update(privateRef, {collectedCards});
+    }
   });
 }
 
@@ -276,7 +332,7 @@ function batakCalculateScores(order, declarerId, highestBid, tricksWon) {
   return scores;
 }
 
-async function initBatakGame(roomId, playerOrder) {
+async function initBatakGame(roomId, playerOrder, totalRounds) {
   if (playerOrder.length !== 4) return; // batak tam 4 oyuncu gerektirir
 
   const deck = shuffle(buildDeck());
@@ -307,6 +363,11 @@ async function initBatakGame(roomId, playerOrder) {
     trickLeaderId: null,
     tricksWon: Object.fromEntries(playerOrder.map((id) => [id, 0])),
     handCounts: Object.fromEntries(playerOrder.map((id) => [id, 13])),
+    cumulativeScores: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+    roundHistory: [],
+    roundReady: Object.fromEntries(playerOrder.map((id) => [id, false])),
+    currentRound: 1,
+    totalRounds: totalRounds || 1,
     status: "playing",
   });
   await batch.commit();
@@ -538,13 +599,51 @@ async function handleBatakMove(roomId, playerId, move, moveRef) {
         const scores = batakCalculateScores(
             pub.playerOrder, pub.declarerId, pub.highestBid, newTricksWon,
         );
-        tx.update(publicRef, {
-          currentTrick: [], handCounts, tricksWon: newTricksWon,
-          trickLeaderId: winnerId, currentTurnPlayerId: winnerId,
-          trumpBroken: newTrumpBroken,
-          phase: "finished", status: "finished", scores,
+
+        const cumulativeScores = {...pub.cumulativeScores};
+        pub.playerOrder.forEach((id) => {
+          cumulativeScores[id] = (cumulativeScores[id] || 0) + (scores[id] || 0);
         });
-        tx.update(db.doc(`rooms/${roomId}`), {status: "finished"});
+
+        const roundHistory = [...(pub.roundHistory || [])];
+        roundHistory.push({
+          round: pub.currentRound,
+          scores: scores,
+        });
+
+        const isLastRound = pub.currentRound >= pub.totalRounds;
+
+        if (isLastRound) {
+          const botSeats = pub.botControlledSeats || [];
+          const realPlayers = pub.playerOrder.filter((id) => !botSeats.includes(id));
+          const rankingSource = realPlayers.length > 0 ? realPlayers : pub.playerOrder;
+          const finalRanking = [...rankingSource].sort((a, b) => (cumulativeScores[b] || 0) - (cumulativeScores[a] || 0));
+
+          tx.update(publicRef, {
+            currentTrick: [], handCounts, tricksWon: newTricksWon,
+            trickLeaderId: winnerId, currentTurnPlayerId: winnerId,
+            trumpBroken: newTrumpBroken,
+            phase: "finished",
+            status: "matchFinished",
+            scores,
+            cumulativeScores,
+            roundHistory,
+            finalRanking,
+          });
+          tx.update(db.doc(`rooms/${roomId}`), {status: "finished"});
+        } else {
+          tx.update(publicRef, {
+            currentTrick: [], handCounts, tricksWon: newTricksWon,
+            trickLeaderId: winnerId, currentTurnPlayerId: winnerId,
+            trumpBroken: newTrumpBroken,
+            phase: "finished",
+            status: "roundFinished",
+            scores,
+            cumulativeScores,
+            roundHistory,
+            roundReady: Object.fromEntries(pub.playerOrder.map((id) => [id, false])),
+          });
+        }
       } else {
         tx.update(publicRef, {
           currentTrick: [], handCounts, tricksWon: newTricksWon,
@@ -584,6 +683,123 @@ async function deleteRoom(roomId) {
   console.log(`Oda silindi: ${roomId}`);
 }
 
+async function handleRoundReadyMove(roomId, playerId, moveRef) {
+  const publicRef = db.doc(`rooms/${roomId}/gameState/public`);
+  const privateRef = db.doc(`rooms/${roomId}/gameState/private`);
+
+  await db.runTransaction(async (tx) => {
+    const [publicSnap, privateSnap] = await Promise.all([
+      tx.get(publicRef), tx.get(privateRef),
+    ]);
+    if (!publicSnap.exists) {
+      tx.update(moveRef, {status: "rejected", reason: "oyun-durumu-bulunamadi"});
+      return;
+    }
+
+    const pub = publicSnap.data();
+    if (pub.status !== "roundFinished") {
+      tx.update(moveRef, {status: "rejected", reason: "oyun-tur-bitisinde-degil"});
+      return;
+    }
+
+    const roundReady = {...pub.roundReady};
+    roundReady[playerId] = true;
+
+    const allReady = pub.playerOrder.every((id) => roundReady[id] === true);
+
+    if (allReady) {
+      const nextRound = pub.currentRound + 1;
+      const deck = shuffle(buildDeck());
+      const playerOrder = pub.playerOrder;
+
+      // Geri dönen oyuncuları bota devredilen koltuklardan çıkar (son 30s içinde presence gönderenler)
+      let botControlledSeats = [...(pub.botControlledSeats || [])];
+      if (botControlledSeats.length > 0) {
+        const now = Date.now();
+        const activeSeats = [];
+        for (const uid of botControlledSeats) {
+          const presSnap = await db.doc(`rooms/${roomId}/presence/${uid}`).get();
+          if (presSnap.exists && presSnap.data().lastActiveAt) {
+            const lastActive = presSnap.data().lastActiveAt.toMillis();
+            if (now - lastActive < 30_000) {
+              console.log(`Oyuncu ${uid} tekrar bağlandı, koltuk bota devredilmekten çıkarılıyor.`);
+              continue; // tekrar aktif, bot seats'ten çıkar
+            }
+          }
+          activeSeats.push(uid);
+        }
+        botControlledSeats = activeSeats;
+      }
+
+      if (pub.gameType === "batak") {
+        const hands = {};
+        for (const uid of playerOrder) hands[uid] = deck.splice(0, 13);
+        
+        const nextDealerIndex = (playerOrder.indexOf(pub.dealerId) + 1) % playerOrder.length;
+        const nextDealerId = playerOrder[nextDealerIndex];
+        const firstBidderIndex = (nextDealerIndex + 1) % playerOrder.length;
+
+        for (const uid of playerOrder) {
+          tx.set(db.doc(`rooms/${roomId}/hands/${uid}`), {cards: hands[uid]});
+        }
+        tx.update(publicRef, {
+          phase: "bidding",
+          dealerId: nextDealerId,
+          bids: {},
+          passedPlayers: [],
+          highestBidderId: null,
+          highestBid: 0,
+          currentTurnPlayerId: playerOrder[firstBidderIndex],
+          trumpSuit: null,
+          trumpBroken: false,
+          declarerId: null,
+          currentTrick: [],
+          trickLeaderId: null,
+          tricksWon: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+          handCounts: Object.fromEntries(playerOrder.map((id) => [id, 13])),
+          status: "playing",
+          currentRound: nextRound,
+          roundReady: Object.fromEntries(playerOrder.map((id) => [id, false])),
+          botControlledSeats,
+        });
+      } else {
+        const hands = {};
+        for (const uid of playerOrder) hands[uid] = deck.splice(0, 4);
+        const tableCards = deck.splice(0, 4);
+
+        for (const uid of playerOrder) {
+          tx.set(db.doc(`rooms/${roomId}/hands/${uid}`), {cards: hands[uid]});
+        }
+        tx.update(publicRef, {
+          tableCards,
+          currentTurnPlayerId: playerOrder[0],
+          handCounts: Object.fromEntries(playerOrder.map((id) => [id, 4])),
+          pistiCounts: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+          collectedCardCounts: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+          currentScores: Object.fromEntries(playerOrder.map((id) => [id, 0])),
+          lastCollectorId: null,
+          deckCount: deck.length,
+          status: "playing",
+          currentRound: nextRound,
+          roundReady: Object.fromEntries(playerOrder.map((id) => [id, false])),
+          botControlledSeats,
+        });
+        tx.set(privateRef, {
+          deck,
+          collectedCards: Object.fromEntries(playerOrder.map((id) => [id, []])),
+        });
+        tx.update(db.doc(`rooms/${roomId}`), {
+          currentRound: nextRound,
+        });
+      }
+    } else {
+      tx.update(publicRef, {roundReady});
+    }
+
+    tx.update(moveRef, {status: "applied"});
+  });
+}
+
 exports.onRoomStatusChange = onDocumentUpdated("rooms/{roomId}", async (event) => {
   const before = event.data.before.data();
   const after = event.data.after.data();
@@ -591,8 +807,8 @@ exports.onRoomStatusChange = onDocumentUpdated("rooms/{roomId}", async (event) =
 
   if (before.status === after.status) return;
 
-  // Oyun tamamlandı → 30 saniye bekle, sonra odayı sil
-  if (after.status === "finished") {
+  // Oyun tamamlandı veya terk edildi → 30 saniye bekle, sonra odayı sil
+  if (after.status === "finished" || after.status === "abandoned") {
     await new Promise((r) => setTimeout(r, 30_000));
     await deleteRoom(roomId);
     return;
@@ -607,13 +823,14 @@ exports.onRoomStatusChange = onDocumentUpdated("rooms/{roomId}", async (event) =
 
   const playerOrder = Object.keys(after.players || {});
   const gameType = after.gameType || "pisti";
+  const totalRounds = after.totalRounds || 1;
 
   if (gameType === "batak") {
     if (playerOrder.length < 4) return;
-    await initBatakGame(roomId, playerOrder);
+    await initBatakGame(roomId, playerOrder, totalRounds);
   } else {
     if (playerOrder.length < 2) return;
-    await initPistiGame(roomId, playerOrder);
+    await initPistiGame(roomId, playerOrder, totalRounds);
   }
 });
 
@@ -623,6 +840,11 @@ exports.onMoveCreated = onDocumentCreated("rooms/{roomId}/moves/{moveId}", async
   const playerId = moveData.playerId;
   const moveRef = event.data.ref;
 
+  if (moveData.type === "roundReady") {
+    await handleRoundReadyMove(roomId, playerId, moveRef);
+    return;
+  }
+
   const publicSnap = await db.doc(`rooms/${roomId}/gameState/public`).get();
   const gameType = publicSnap.exists ? (publicSnap.data().gameType || "pisti") : "pisti";
 
@@ -631,4 +853,243 @@ exports.onMoveCreated = onDocumentCreated("rooms/{roomId}/moves/{moveId}", async
   } else {
     await handlePistiMove(roomId, playerId, moveData.card, moveRef);
   }
+});
+
+// ============ BOT DEVRALMA (BOT TAKEOVER) MANITIĞI ============
+
+function pistiBotDecideMove(pub, hand) {
+  if (!hand || hand.length === 0) return null;
+  const tableCards = pub.tableCards || [];
+  if (tableCards.length > 0) {
+    const topCard = tableCards[tableCards.length - 1];
+    const matchCard = hand.find((c) => c.rank === topCard.rank);
+    if (matchCard) return matchCard;
+
+    const jackCard = hand.find((c) => c.rank === "jack");
+    if (jackCard) return jackCard;
+  }
+  return hand[Math.floor(Math.random() * hand.length)];
+}
+
+function batakBotDecideMove(pub, hand) {
+  const phase = pub.phase || "bidding";
+
+  if (phase === "bidding") {
+    const currentBid = pub.highestBid || 0;
+    const nextBid = Math.max(MIN_BID, currentBid + 1);
+    let willBid = false;
+
+    if (currentBid < 7) {
+      willBid = Math.random() < 0.7;
+    } else if (currentBid === 7) {
+      willBid = Math.random() < 0.25;
+    } else if (currentBid === 8) {
+      willBid = Math.random() < 0.05;
+    }
+
+    if (willBid && nextBid <= 13) {
+      return {type: "bid", bid: nextBid};
+    }
+    return {type: "pass"};
+  }
+
+  if (phase === "chooseTrump") {
+    const counts = {spades: 0, hearts: 0, diamonds: 0, clubs: 0};
+    (hand || []).forEach((c) => {
+      if (counts[c.suit] !== undefined) counts[c.suit]++;
+    });
+    let bestSuit = "spades";
+    let maxCount = -1;
+    for (const suit of SUITS) {
+      if (counts[suit] > maxCount) {
+        maxCount = counts[suit];
+        bestSuit = suit;
+      }
+    }
+    return {type: "chooseTrump", suit: bestSuit};
+  }
+
+  if (phase === "playing") {
+    if (!hand || hand.length === 0) return null;
+
+    const currentTrick = pub.currentTrick || [];
+    const trumpSuit = pub.trumpSuit;
+    const trumpBroken = pub.trumpBroken || false;
+
+    const ledSuit = currentTrick.length > 0 ? currentTrick[0].card.suit : null;
+    const hasLedSuit = ledSuit ? hand.some((c) => c.suit === ledSuit) : false;
+    const isOpening = currentTrick.length === 0;
+
+    let validCards = [...hand];
+
+    if (hasLedSuit) {
+      validCards = validCards.filter((c) => c.suit === ledSuit);
+
+      const trumpInTrick = currentTrick.some((tc) => tc.card.suit === trumpSuit);
+      if (!trumpInTrick && ledSuit) {
+        let highestLedVal = -1;
+        currentTrick.forEach((tc) => {
+          if (tc.card.suit === ledSuit && RANK_VALUE[tc.card.rank] > highestLedVal) {
+            highestLedVal = RANK_VALUE[tc.card.rank];
+          }
+        });
+        if (highestLedVal >= 0) {
+          const higher = validCards.filter((c) => RANK_VALUE[c.rank] > highestLedVal);
+          if (higher.length > 0) validCards = higher;
+        }
+      }
+    } else if (isOpening && !trumpBroken && trumpSuit) {
+      const nonTrump = validCards.filter((c) => c.suit !== trumpSuit);
+      if (nonTrump.length > 0) validCards = nonTrump;
+    }
+
+    const chosen = validCards.length > 0
+      ? validCards[Math.floor(Math.random() * validCards.length)]
+      : hand[Math.floor(Math.random() * hand.length)];
+
+    return {type: "playCard", card: chosen};
+  }
+
+  return null;
+}
+
+async function triggerBotActionsIfNeeded(roomId) {
+  const publicRef = db.doc(`rooms/${roomId}/gameState/public`);
+  const publicSnap = await publicRef.get();
+  if (!publicSnap.exists) return;
+  const pub = publicSnap.data();
+  const roomSnap = await db.doc(`rooms/${roomId}`).get();
+  const roomData = roomSnap.exists ? roomSnap.data() : {};
+  const playerOrder = pub.playerOrder || Object.keys(roomData.players || {});
+  const botControlledSeats = Array.from(new Set([
+    ...(pub.botControlledSeats || []),
+    ...(roomData.botControlledSeats || []),
+  ]));
+
+  if (botControlledSeats.length === 0) return;
+
+  // Odadaki tüm oyuncular çıktı/bot devrinde ise odayı tamamen sil
+  if (playerOrder.length > 0 && botControlledSeats.length >= playerOrder.length) {
+    console.log(`Odadaki tüm oyuncular çıktı/bot devrinde (${roomId}). Oda siliniyor.`);
+    await deleteRoom(roomId);
+    return;
+  }
+
+  // Tur sonu durumunda botlar için otomatik roundReady hamlesi
+  if (pub.status === "roundFinished") {
+    for (const botUid of botControlledSeats) {
+      if (!pub.roundReady || !pub.roundReady[botUid]) {
+        const moveRef = db.collection(`rooms/${roomId}/moves`).doc();
+        await moveRef.set({
+          type: "roundReady",
+          playerId: botUid,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+    return;
+  }
+
+  if (pub.status !== "playing") return;
+
+  let currentTurn = pub.currentTurnPlayerId;
+  if (!currentTurn) return;
+
+  // İnaktiflik kontrolü (60 saniye boyunca varlık sinyali gelmemişse bot devralır)
+  if (!botControlledSeats.includes(currentTurn)) {
+    const presSnap = await db.doc(`rooms/${roomId}/presence/${currentTurn}`).get();
+    let isInactive = false;
+    let is60sAbandoned = false;
+
+    if (presSnap.exists && presSnap.data().lastActiveAt) {
+      const lastActive = presSnap.data().lastActiveAt.toMillis();
+      const diff = Date.now() - lastActive;
+      if (diff > 35_000) {
+        isInactive = true;
+      }
+      if (diff > 60_000) {
+        is60sAbandoned = true;
+      }
+    } else {
+      // Presence dökümanı henüz yoksa oyuncuyu aktif varsay (bot devralmasın)
+      isInactive = false;
+    }
+
+    if (isInactive) {
+      console.log(`Oyuncu ${currentTurn} 35s boyunca inaktif/uygulamadan çıkmış, bot devralıyor.`);
+      botControlledSeats.push(currentTurn);
+      const abandonedUsersCounted = pub.abandonedUsersCounted || [];
+
+      if (is60sAbandoned && !abandonedUsersCounted.includes(currentTurn)) {
+        abandonedUsersCounted.push(currentTurn);
+        try {
+          await db.doc(`users/${currentTurn}`).set({
+            stats: {
+              abandonedGamesCount: FieldValue.increment(1),
+            },
+          }, {merge: true});
+        } catch (e) {
+          console.error("User abandoned stats güncellenemedi:", e);
+        }
+      }
+
+      await publicRef.update({
+        botControlledSeats: Array.from(new Set(botControlledSeats)),
+        abandonedUsersCounted: Array.from(new Set(abandonedUsersCounted)),
+      });
+      await db.doc(`rooms/${roomId}`).update({
+        botControlledSeats: Array.from(new Set(botControlledSeats)),
+        abandonedUsersCounted: Array.from(new Set(abandonedUsersCounted)),
+      });
+    } else {
+      // Sıradaki oyuncu aktif ve bot kontrolünde değil, sırasını bekler
+      return;
+    }
+  }
+
+  // Bot hamlesi öncesi 700ms gerçekçi gecikme
+  await new Promise((r) => setTimeout(r, 700));
+
+  const handSnap = await db.doc(`rooms/${roomId}/hands/${currentTurn}`).get();
+  const hand = handSnap.exists ? (handSnap.data().cards || []) : [];
+
+  if (pub.gameType === "batak") {
+    const botMove = batakBotDecideMove(pub, hand);
+    if (botMove) {
+      botMove.playerId = currentTurn;
+      botMove.createdAt = new Date().toISOString();
+      const moveRef = db.collection(`rooms/${roomId}/moves`).doc();
+      await moveRef.set(botMove);
+    }
+  } else {
+    const card = pistiBotDecideMove(pub, hand);
+    if (card) {
+      const moveRef = db.collection(`rooms/${roomId}/moves`).doc();
+      await moveRef.set({
+        type: "playCard",
+        playerId: currentTurn,
+        card: card,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+exports.onPublicGameStateChange = onDocumentUpdated("rooms/{roomId}/gameState/public", async (event) => {
+  const roomId = event.params.roomId;
+  await triggerBotActionsIfNeeded(roomId);
+});
+
+exports.onRoomUpdated = onDocumentUpdated("rooms/{roomId}", async (event) => {
+  const roomId = event.params.roomId;
+  await triggerBotActionsIfNeeded(roomId);
+});
+
+exports.onRoomDeleted = onDocumentDeleted("rooms/{roomId}", async (event) => {
+  const roomId = event.params.roomId;
+  console.log(`Oda dokümanı silindi, alt koleksiyonlar temizleniyor: ${roomId}`);
+  await deleteCollection(db.collection(`rooms/${roomId}/gameState`));
+  await deleteCollection(db.collection(`rooms/${roomId}/hands`));
+  await deleteCollection(db.collection(`rooms/${roomId}/moves`));
+  await deleteCollection(db.collection(`rooms/${roomId}/presence`));
 });

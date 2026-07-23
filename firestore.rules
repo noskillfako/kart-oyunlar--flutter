@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Kullanıcı profilleri: herkes okuyabilir, sadece sahibi yazabilir ─────────────
+    match /users/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ── Odalar ────────────────────────────────────────────────────────────
+    match /rooms/{roomId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null;
+      allow delete: if request.auth != null; // artık silme izni var
+    }
+
+    match /rooms/{roomId}/gameState/public {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /rooms/{roomId}/gameState/private {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /rooms/{roomId}/hands/{playerId} {
+      allow read: if request.auth != null && request.auth.uid == playerId;
+      allow write: if false;
+    }
+
+    match /rooms/{roomId}/moves/{moveId} {
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.playerId;
+      allow read: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+    match /rooms/{roomId}/presence/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+
+  }
+}

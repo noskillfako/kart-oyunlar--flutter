@@ -3,6 +3,8 @@ import '../services/room_service.dart';
 import '../theme/app_theme.dart';
 import 'waiting_room_screen.dart';
 import 'room_list_screen.dart';
+import 'game_screen.dart';
+import 'batak_game_screen.dart';
 
 // ─── Oyun türü modeli ─────────────────────────────────────────────────────────
 class _GameType {
@@ -52,6 +54,7 @@ class _LobbyScreenState extends State<LobbyScreen>
 
   int _selectedGameIndex = 0;
   int _selectedPlayers = 2;
+  int _selectedRounds = 3; // Varsayılan 3 tur
   bool _isCreating = false;
 
   late final AnimationController _fadeCtrl;
@@ -95,6 +98,7 @@ class _LobbyScreenState extends State<LobbyScreen>
       final roomId = await _roomService.createRoom(
         gameType: _selectedGame.id,
         maxPlayers: _selectedPlayers,
+        totalRounds: _selectedRounds,
       );
       if (mounted) {
         Navigator.push(
@@ -122,6 +126,85 @@ class _LobbyScreenState extends State<LobbyScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                // Devam Eden Oyun Bildirim Kartı
+                StreamBuilder<Map<String, dynamic>?>(
+                  stream: _roomService.watchActiveRoomForUser(),
+                  builder: (context, activeSnap) {
+                    final activeData = activeSnap.data;
+                    if (activeData == null) return const SizedBox.shrink();
+
+                    final roomId = activeData['roomId'] as String;
+                    final gameType = activeData['gameType'] as String? ?? 'pisti';
+
+                    return Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 20),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFC107).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFFFC107), width: 1.8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFFC107).withValues(alpha: 0.25),
+                            blurRadius: 15,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: [
+                          const Text(
+                            '🎮 Devam Eden Oyununuz Var!',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '(${gameType.toUpperCase()} - Tur: ${activeData['currentRound'] ?? 1})',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                          const SizedBox(height: 12),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFFFC107),
+                              foregroundColor: Colors.black,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                            ),
+                            onPressed: () {
+                              if (gameType == 'batak') {
+                                final players = Map<String, dynamic>.from(activeData['players'] ?? {});
+                                final names = <String, String>{};
+                                players.forEach((k, v) {
+                                  names[k] = (v as Map)['displayName'] as String? ?? 'Oyuncu';
+                                });
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => BatakGameScreen(
+                                      roomId: roomId,
+                                      playerNames: names,
+                                    ),
+                                  ),
+                                );
+                              } else {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => GameScreen(roomId: roomId),
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                            label: const Text('Oyuna Tekrar Katıl', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
                 // ── Başlık ──────────────────────────────────────────────────
                 Row(
                   children: [
@@ -199,6 +282,52 @@ class _LobbyScreenState extends State<LobbyScreen>
                                     selected: _selectedPlayers == count,
                                     onTap: () =>
                                         setState(() => _selectedPlayers = count),
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Tur Sayısı ──────────────────────────────────────────────
+                FadeTransition(
+                  opacity: _fadeAnim,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          const Icon(Icons.repeat_rounded,
+                              color: AppColors.gold, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Tur Sayısı',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [1, 3, 5, 7]
+                            .map(
+                              (rounds) => Expanded(
+                                child: Padding(
+                                  padding: EdgeInsets.only(
+                                    right: rounds != 7 ? 10 : 0,
+                                  ),
+                                  child: _RoundCountChip(
+                                    rounds: rounds,
+                                    selected: _selectedRounds == rounds,
+                                    onTap: () =>
+                                        setState(() => _selectedRounds = rounds),
                                   ),
                                 ),
                               ),
@@ -412,6 +541,50 @@ class _PlayerCountChip extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Tur Sayısı Chip ──────────────────────────────────────────────────────────
+class _RoundCountChip extends StatelessWidget {
+  final int rounds;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _RoundCountChip({
+    required this.rounds,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.gold.withValues(alpha: 0.15)
+              : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? AppColors.gold : Colors.white12,
+            width: selected ? 1.5 : 1,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            '$rounds Tur',
+            style: TextStyle(
+              color: selected ? Colors.white : Colors.white.withValues(alpha: 0.4),
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
         ),
       ),
     );

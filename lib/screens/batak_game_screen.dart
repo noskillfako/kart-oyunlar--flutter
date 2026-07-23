@@ -7,6 +7,9 @@ import '../services/batak_game_service.dart';
 import '../widgets/playing_card_widget.dart';
 import '../theme/app_theme.dart';
 import '../engine/batak/batak_engine.dart';
+import '../services/room_service.dart';
+
+import '../services/presence_service.dart';
 
 class _TrickEntry {
   final String playerId;
@@ -30,6 +33,8 @@ class BatakGameScreen extends StatefulWidget {
 
 class _BatakGameScreenState extends State<BatakGameScreen> {
   final BatakGameService _service = BatakGameService();
+  final PresenceService _presenceService = PresenceService();
+  final RoomService _roomService = RoomService();
   final String? _myUid = FirebaseAuth.instance.currentUser?.uid;
 
   String? _playingCardId;
@@ -40,7 +45,89 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
   bool _trickJustCompleted = false;
   Timer? _trickClearTimer;
 
-  String _nameOf(String uid) => widget.playerNames[uid] ?? 'Oyuncu';
+  Timer? _watchdogTimer;
+  String? _watchdogTurnPlayerId;
+
+  int _turnSecondsLeft = 30;
+  Timer? _turnCountdownTimer;
+  bool _isTurnCountdownActive = false;
+  Timer? _presenceTickerTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _presenceService.startHeartbeat(widget.roomId);
+    if (_myUid != null) {
+      _roomService.reclaimSeat(widget.roomId, _myUid);
+    }
+    _presenceTickerTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _presenceService.stopHeartbeat();
+    _presenceTickerTimer?.cancel();
+    _trickClearTimer?.cancel();
+    _watchdogTimer?.cancel();
+    _turnCountdownTimer?.cancel();
+    super.dispose();
+  }
+
+  void _syncTurnTimer(bool isMyTurn, List<PlayingCard> myHand, String phase) {
+    if (isMyTurn && !_isTurnCountdownActive) {
+      _isTurnCountdownActive = true;
+      _turnSecondsLeft = 30;
+      _turnCountdownTimer?.cancel();
+      _turnCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (!mounted) return;
+        if (_turnSecondsLeft > 1) {
+          setState(() => _turnSecondsLeft--);
+        } else {
+          timer.cancel();
+          _isTurnCountdownActive = false;
+          _autoPlayBatakTurn(myHand, phase);
+        }
+      });
+    } else if (!isMyTurn && _isTurnCountdownActive) {
+      _isTurnCountdownActive = false;
+      _turnCountdownTimer?.cancel();
+      _turnSecondsLeft = 30;
+    }
+  }
+
+  void _autoPlayBatakTurn(List<PlayingCard> myHand, String phase) {
+    if (phase == 'bidding') {
+      _service.pass(widget.roomId);
+    } else if (phase == 'playing' && myHand.isNotEmpty && _playingCardId == null) {
+      final randomCard = (List<PlayingCard>.from(myHand)..shuffle()).first;
+      _playCard(randomCard);
+    }
+  }
+
+  void _updateWatchdog(String? currentTurn, List<String> botSeats) {
+    if (currentTurn != null && currentTurn != _myUid && !botSeats.contains(currentTurn)) {
+      if (_watchdogTurnPlayerId != currentTurn) {
+        _watchdogTimer?.cancel();
+        _watchdogTurnPlayerId = currentTurn;
+        _watchdogTimer = Timer(const Duration(seconds: 35), () {
+          _roomService.claimBotTakeover(widget.roomId, currentTurn);
+        });
+      }
+    } else {
+      _watchdogTimer?.cancel();
+      _watchdogTurnPlayerId = null;
+    }
+  }
+
+  String _nameOf(String uid, [List<String>? botSeats]) {
+    final name = widget.playerNames[uid] ?? 'Oyuncu';
+    if (botSeats != null && botSeats.contains(uid)) {
+      return '$name (Bot)';
+    }
+    return name;
+  }
 
   // Kart değeri hesabı (iki=0 ... as=12)
   static const _rankOrder = [
@@ -62,11 +149,7 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _trickClearTimer?.cancel();
-    super.dispose();
-  }
+
 
   void _trackTrickCompletion(int currentTrickLength) {
     if (currentTrickLength == 4 && _prevTrickLength != 4) {
@@ -96,69 +179,157 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
       return const Scaffold(body: Center(child: Text('Giriş yapılmamış')));
     }
 
-    return Scaffold(
-      backgroundColor: AppColors.deepGreen,
-      appBar: AppBar(
-        title: const Text('Batak'),
-        backgroundColor: AppColors.darkGreen,
-        foregroundColor: Colors.white,
-        centerTitle: true,
-      ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: _service.watchPublicState(widget.roomId),
-        builder: (context, publicSnap) {
-          if (!publicSnap.hasData || !publicSnap.data!.exists) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.gold),
-            );
-          }
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (_myUid != null) {
+          await _roomService.leaveRoom(widget.roomId);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.deepGreen,
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              if (_myUid != null) {
+                await _roomService.leaveRoom(widget.roomId);
+              }
+              if (context.mounted) Navigator.pop(context);
+            },
+          ),
+          title: const Text('Batak'),
+          backgroundColor: AppColors.darkGreen,
+          foregroundColor: Colors.white,
+          centerTitle: true,
+        ),
+        body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: _service.watchPublicState(widget.roomId),
+          builder: (context, publicSnap) {
+            if (!publicSnap.hasData || !publicSnap.data!.exists) {
+              return const Center(
+                child: CircularProgressIndicator(color: AppColors.gold),
+              );
+            }
 
-          final pub = publicSnap.data!.data()!;
-          final phase = pub['phase'] ?? 'bidding';
-          final status = pub['status'] ?? 'playing';
-          final playerOrder = List<String>.from(pub['playerOrder'] ?? []);
-          final dealerId = pub['dealerId'] as String?;
-          final bids = Map<String, dynamic>.from(pub['bids'] ?? {});
-          final passedPlayers = List<String>.from(pub['passedPlayers'] ?? []);
-          final highestBidderId = pub['highestBidderId'] as String?;
-          final highestBid = pub['highestBid'] ?? 0;
-          final currentTurnPlayerId = pub['currentTurnPlayerId'] as String?;
-          final trumpSuitStr = pub['trumpSuit'] as String?;
-          final trumpSuit = trumpSuitStr != null
-              ? Suit.values.firstWhere((s) => s.name == trumpSuitStr)
-              : null;
-          final declarerId = pub['declarerId'] as String?;
-          debugPrint('BatakGameScreen build edildi. Status: $status, Phase: $phase, CurrentTurnPlayerId: $currentTurnPlayerId, PlayerOrder: $playerOrder');
-          final tricksWon = Map<String, dynamic>.from(pub['tricksWon'] ?? {});
-          final currentTrickRaw = List<Map<String, dynamic>>.from(pub['currentTrick'] ?? []);
-          final currentTrick = currentTrickRaw
-              .map((t) => _TrickEntry(t['playerId'], PlayingCard.fromMap(t['card'])))
-              .toList();
-          final trumpBroken = pub['trumpBroken'] as bool? ?? false;
+            final pub = publicSnap.data!.data()!;
+            final phase = pub['phase'] ?? 'bidding';
+            final status = pub['status'] ?? 'playing';
+            final currentTurnPlayerId = pub['currentTurnPlayerId'] as String?;
+            final botControlledSeats = List<String>.from(pub['botControlledSeats'] ?? []);
 
-          // Trick tamamlanma durumunu takip et (state değişikliği build sırasında,
-          // sadece Timer'ın kendisi setState tetikler)
-          _trackTrickCompletion(currentTrick.length);
+            if (_myUid != null && botControlledSeats.contains(_myUid)) {
+              _roomService.reclaimSeat(widget.roomId, _myUid);
+            }
 
-          if (status == 'abandoned') {
-            return Center(child: _buildAbandonedPanel());
-          }
+            _updateWatchdog(currentTurnPlayerId, botControlledSeats);
 
-          if (status == 'finished' || phase == 'finished') {
-            return Center(child: _buildGameOver(pub, playerOrder));
-          }
+            final playerOrder = List<String>.from(pub['playerOrder'] ?? []);
+            final dealerId = pub['dealerId'] as String?;
+            final bids = Map<String, dynamic>.from(pub['bids'] ?? {});
+            final passedPlayers = List<String>.from(pub['passedPlayers'] ?? []);
+            final highestBidderId = pub['highestBidderId'] as String?;
+            final highestBid = pub['highestBid'] ?? 0;
+            final trumpSuitStr = pub['trumpSuit'] as String?;
+            final trumpSuit = trumpSuitStr != null
+                ? Suit.values.firstWhere((s) => s.name == trumpSuitStr)
+                : null;
+            final declarerId = pub['declarerId'] as String?;
+            debugPrint('BatakGameScreen build edildi. Status: $status, Phase: $phase, CurrentTurnPlayerId: $currentTurnPlayerId, PlayerOrder: $playerOrder');
+            final tricksWon = Map<String, dynamic>.from(pub['tricksWon'] ?? {});
+            final currentTrickRaw = List<Map<String, dynamic>>.from(pub['currentTrick'] ?? []);
+            final currentTrick = currentTrickRaw
+                .map((t) => _TrickEntry(t['playerId'], PlayingCard.fromMap(t['card'])))
+                .toList();
+            final trumpBroken = pub['trumpBroken'] as bool? ?? false;
 
-          return Column(
-            children: [
-              _buildHeader(playerOrder, dealerId, bids, passedPlayers,
-                  highestBidderId, currentTurnPlayerId, declarerId,
-                  tricksWon, phase, highestBid),
-              const SizedBox(height: 6),
+            // Trick tamamlanma durumunu takip et
+            _trackTrickCompletion(currentTrick.length);
+
+            if (status == 'abandoned') {
+              return Center(child: _buildAbandonedPanel());
+            }
+
+            if (status == 'roundFinished') {
+              return Center(child: _buildRoundFinishedPanel(pub, playerOrder));
+            }
+
+            if (status == 'matchFinished' || status == 'finished') {
+              return Center(child: _buildMatchFinishedPanel(pub, playerOrder));
+            }
+
+            final activeTurnOpponentId = (currentTurnPlayerId != null && currentTurnPlayerId != _myUid) ? currentTurnPlayerId : '';
+
+            return Column(
+              children: [
+                _buildHeader(pub, playerOrder, dealerId, bids, passedPlayers,
+                    highestBidderId, currentTurnPlayerId, declarerId,
+                    tricksWon, phase, highestBid),
+                
+                // Canlı Bildirim Çubuğu
+                if (activeTurnOpponentId.isNotEmpty)
+                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('rooms')
+                        .doc(widget.roomId)
+                        .collection('presence')
+                        .doc(activeTurnOpponentId)
+                        .snapshots(),
+                    builder: (context, presSnap) {
+                      final presData = presSnap.data?.data();
+                      final lastActiveTimestamp = presData?['lastActiveAt'] as Timestamp?;
+                      final lastActiveMs = lastActiveTimestamp?.millisecondsSinceEpoch;
+                      final nowMs = DateTime.now().millisecondsSinceEpoch;
+
+                      final isStale = lastActiveMs != null && (nowMs - lastActiveMs > 8000);
+                      final isOpponentBot = botControlledSeats.contains(activeTurnOpponentId);
+                      final oppName = _nameOf(activeTurnOpponentId);
+
+                      String? bannerText;
+                      Color bannerColor = Colors.orange;
+
+                      if (isOpponentBot) {
+                        bannerText = '🤖 Bot devraldı. $oppName oyundan çıktı / bekleniyor...';
+                        bannerColor = Colors.amber.shade800;
+                      } else if (isStale) {
+                        bannerText = '⚠️ $oppName oyundan çıktı / bağlantısı koptu...';
+                        bannerColor = Colors.orange.shade800;
+                        if (lastActiveMs != null && nowMs - lastActiveMs > 10000) {
+                          _roomService.claimBotTakeover(widget.roomId, activeTurnOpponentId);
+                        }
+                      }
+
+                      if (bannerText == null) return const SizedBox.shrink();
+
+                      return Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: bannerColor.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: bannerColor, width: 1.2),
+                        ),
+                        child: Center(
+                          child: Text(
+                            bannerText,
+                            style: TextStyle(color: bannerColor, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                const SizedBox(height: 6),
               Expanded(
                 child: StreamBuilder<List<PlayingCard>>(
                   stream: _service.watchMyHand(widget.roomId),
                   builder: (context, handSnap) {
                     final myHand = handSnap.data ?? [];
+                    final isMyTurn = currentTurnPlayerId == _myUid;
+
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) _syncTurnTimer(isMyTurn && status == 'playing', myHand, phase);
+                    });
+
                     switch (phase) {
                       case 'bidding':
                         return _buildBiddingUI(
@@ -184,10 +355,12 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
           );
         },
       ),
-    );
+    ),
+  );
   }
 
   Widget _buildHeader(
+    Map<String, dynamic> pub,
     List<String> playerOrder,
     String? dealerId,
     Map<String, dynamic> bids,
@@ -203,73 +376,89 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     return Container(
       padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
       color: Colors.black.withValues(alpha: 0.15),
-      child: Row(
-        children: playerOrder.map((id) {
-          final tricks = tricksWon[id] ?? 0;
-          final isMe = id == _myUid;
-          final isTurn = currentTurnPlayerId == id;
-          final isDeclarer = declarerId == id;
-          final isPassed = passedPlayers.contains(id);
-          final currentBid = bids[id];
-
-          String subLabel;
-          if (isBidding) {
-            subLabel = isPassed ? 'Pas' : (currentBid != null ? '$currentBid el' : '-');
-          } else {
-            subLabel = '$tricks el';
-          }
-
-          Color subColor;
-          if (isBidding) {
-            subColor = isPassed
-                ? Colors.red.shade300
-                : currentBid != null
-                    ? const Color(0xFFD4AF37)
-                    : Colors.white38;
-          } else {
-            subColor = isTurn ? AppColors.gold : Colors.white54;
-          }
-
-          return Expanded(
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 2),
-              padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
-              decoration: BoxDecoration(
-                color: isTurn
-                    ? AppColors.gold.withValues(alpha: 0.15)
-                    : Colors.black.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isTurn ? AppColors.gold : Colors.white12,
-                  width: isTurn ? 1.5 : 0.7,
-                ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _nameOf(id),
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: isMe ? AppColors.goldDeep : Colors.white70,
-                      fontSize: 10,
-                      fontWeight: isMe ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                  if (isDeclarer && phase != 'bidding')
-                    Text(
-                      'Elci · $highestBid',
-                      style: const TextStyle(color: Color(0xFF80CBC4), fontSize: 9),
-                    ),
-                  Text(
-                    subLabel,
-                    style: TextStyle(color: subColor, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4.0),
+            child: Text(
+              'Tur: ${pub['currentRound'] ?? 1} / ${pub['totalRounds'] ?? 1}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.5),
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          );
-        }).toList(),
+          ),
+          Row(
+            children: playerOrder.map((id) {
+              final tricks = tricksWon[id] ?? 0;
+              final isMe = id == _myUid;
+              final isTurn = currentTurnPlayerId == id;
+              final isDeclarer = declarerId == id;
+              final isPassed = passedPlayers.contains(id);
+              final currentBid = bids[id];
+
+              String subLabel;
+              if (isBidding) {
+                subLabel = isPassed ? 'Pas' : (currentBid != null ? '$currentBid el' : '-');
+              } else {
+                subLabel = '$tricks el';
+              }
+
+              Color subColor;
+              if (isBidding) {
+                subColor = isPassed
+                    ? Colors.red.shade300
+                    : currentBid != null
+                        ? const Color(0xFFD4AF37)
+                        : Colors.white38;
+              } else {
+                subColor = isTurn ? AppColors.gold : Colors.white54;
+              }
+
+              return Expanded(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: isTurn
+                        ? AppColors.gold.withValues(alpha: 0.15)
+                        : Colors.black.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isTurn ? AppColors.gold : Colors.white12,
+                      width: isTurn ? 1.5 : 0.7,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _nameOf(id),
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isMe ? AppColors.goldDeep : Colors.white70,
+                          fontSize: 10,
+                          fontWeight: isMe ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      if (isDeclarer && phase != 'bidding')
+                        Text(
+                          'Elci · $highestBid',
+                          style: const TextStyle(color: Color(0xFF80CBC4), fontSize: 9),
+                        ),
+                      Text(
+                        subLabel,
+                        style: TextStyle(color: subColor, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -519,10 +708,10 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
         ),
         _buildTable(southId, westId, northId, eastId, cardOf, trumpSuit, trickToShow.isEmpty),
         if (waitingToStartNewTrick)
-          _turnBanner('Eli aldın! Yeni eli başlatmak için bir kart oyna', true)
+          _turnBanner('Eli aldın! Yeni eli başlatmak için bir kart oyna (⏱️ ${_turnSecondsLeft}s)', true)
         else
           _turnBanner(
-            myTurn ? 'Senin sıran' : '${_nameOf(currentTurnPlayerId ?? '')} oynuyor...',
+            myTurn ? 'Senin sıran (⏱️ ${_turnSecondsLeft}s)' : '${_nameOf(currentTurnPlayerId ?? '')} oynuyor...',
             myTurn,
           ),
         Expanded(child: _myHand2Rows(myHand, myTurn, currentTrick, trumpSuit, trumpBroken)),
@@ -864,7 +1053,11 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
                 foregroundColor: Colors.black,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
-              onPressed: () => Navigator.popUntil(context, (r) => r.isFirst),
+              onPressed: () async {
+                await _roomService.leaveRoom(widget.roomId);
+                if (!mounted) return;
+                Navigator.popUntil(context, (r) => r.isFirst);
+              },
               child: const Text('Ana Ekrana Dön', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ),
@@ -873,53 +1066,227 @@ class _BatakGameScreenState extends State<BatakGameScreen> {
     );
   }
 
-  Widget _buildGameOver(Map<String, dynamic> pub, List<String> playerOrder) {
+  Widget _buildRoundFinishedPanel(Map<String, dynamic> pub, List<String> playerOrder) {
     final scores = Map<String, dynamic>.from(pub['scores'] ?? {});
-    final pairs = playerOrder.map((id) => (id, (scores[id] ?? 0) as int)).toList()
-      ..sort((a, b) => b.$2.compareTo(a.$2));
-    final winnerId = pairs.first.$1;
+    final cumulativeScores = Map<String, dynamic>.from(pub['cumulativeScores'] ?? {});
+    final roundReady = Map<String, dynamic>.from(pub['roundReady'] ?? {});
+    final isReady = roundReady[_myUid] == true;
+
+    final currentRound = pub['currentRound'] ?? 1;
+    final totalRounds = pub['totalRounds'] ?? 1;
+
+    return Container(
+      margin: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.85),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.5), width: 1.5),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Tur $currentRound / $totalRounds Tamamlandı!',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          Table(
+            columnWidths: const {
+              0: FlexColumnWidth(2),
+              1: FlexColumnWidth(1),
+              2: FlexColumnWidth(1),
+            },
+            children: [
+              const TableRow(
+                children: [
+                  Text('Oyuncu', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text('Bu Tur', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                  Text('Toplam', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                ],
+              ),
+              ...playerOrder.map((id) {
+                final isMe = id == _myUid;
+                final rScore = scores[id] ?? 0;
+                final cScore = cumulativeScores[id] ?? 0;
+                return TableRow(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6.0),
+                      child: Text(
+                        _nameOf(id),
+                        style: TextStyle(
+                          color: isMe ? AppColors.gold : Colors.white,
+                          fontWeight: isMe ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6.0),
+                      child: Text(
+                        '${rScore >= 0 ? '+' : ''}$rScore',
+                        style: TextStyle(
+                          color: rScore >= 0 ? Colors.greenAccent : Colors.redAccent,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6.0),
+                      child: Text(
+                        '$cScore',
+                        style: TextStyle(
+                          color: isMe ? AppColors.gold : Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ],
+                );
+              }),
+            ],
+          ),
+          const SizedBox(height: 24),
+          isReady
+              ? const Column(
+                  children: [
+                    CircularProgressIndicator(color: AppColors.gold),
+                    SizedBox(height: 12),
+                    Text('Diğer oyuncular bekleniyor...', style: TextStyle(color: Colors.white70, fontSize: 13, fontStyle: FontStyle.italic)),
+                  ],
+                )
+              : SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.gold,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () async {
+                      await FirebaseFirestore.instance
+                          .collection('rooms')
+                          .doc(widget.roomId)
+                          .collection('moves')
+                          .add({
+                        'type': 'roundReady',
+                        'playerId': _myUid,
+                        'createdAt': FieldValue.serverTimestamp(),
+                      });
+                    },
+                    child: const Text('Devam Et', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMatchFinishedPanel(Map<String, dynamic> pub, List<String> playerOrder) {
+    final cumulativeScores = Map<String, dynamic>.from(pub['cumulativeScores'] ?? {});
+    final finalRanking = List<String>.from(pub['finalRanking'] ?? playerOrder);
+
+    final winnerId = finalRanking.isNotEmpty ? finalRanking.first : playerOrder.first;
     final iWon = winnerId == _myUid;
 
     return Container(
       margin: const EdgeInsets.all(20),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.82),
+        color: Colors.black.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.goldDeep.withValues(alpha: 0.5), width: 1.5),
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.7), width: 2.0),
+        boxShadow: [
+          BoxShadow(color: AppColors.gold.withValues(alpha: 0.2), blurRadius: 20, spreadRadius: 2)
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            iWon ? '🎉 Sen kazandın!' : '${_nameOf(winnerId)} kazandı!',
+            iWon ? '🎉 Tebrikler, Şampiyonsun! 🏆' : '${_nameOf(winnerId)} Şampiyon Oldu!',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 8),
+          Text(
+            'Final Maç Sıralaması',
+            style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.5)),
+          ),
           const SizedBox(height: 16),
-          ...pairs.map((p) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(_nameOf(p.$1), style: const TextStyle(color: Colors.white60, fontSize: 13)),
-                    Text('${p.$2}',
-                        style: const TextStyle(
-                            color: AppColors.gold, fontSize: 15, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              )),
-          const SizedBox(height: 18),
+          ...finalRanking.asMap().entries.map((entry) {
+            final rank = entry.key + 1;
+            final uid = entry.value;
+            final score = cumulativeScores[uid] ?? 0;
+            final isMe = uid == _myUid;
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Container(
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      color: rank == 1 ? AppColors.gold : Colors.white12,
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      '$rank',
+                      style: TextStyle(
+                        color: rank == 1 ? Colors.black : Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _nameOf(uid),
+                      style: TextStyle(
+                        color: isMe ? AppColors.gold : Colors.white70,
+                        fontSize: 14,
+                        fontWeight: isMe ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$score Puan',
+                    style: TextStyle(
+                      color: isMe ? AppColors.gold : Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
+            height: 44,
             child: ElevatedButton(
-              onPressed: () => Navigator.popUntil(context, (r) => r.isFirst),
+              onPressed: () async {
+                await _roomService.leaveRoom(widget.roomId);
+                if (!mounted) return;
+                Navigator.popUntil(context, (r) => r.isFirst);
+              },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.gold,
                 foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              child: const Text('Ana Ekrana Dön', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Ana Ekrana Dön', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ),
           ),
         ],

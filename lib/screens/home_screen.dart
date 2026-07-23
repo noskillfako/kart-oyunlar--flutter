@@ -1,10 +1,16 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'lobby_screen.dart';
 import 'demo_selection_screen.dart';
+import 'lobby_screen.dart';
+import 'profile_screen.dart';
 import 'set_name_screen.dart';
-import '../services/user_prefs_service.dart';
+import 'game_screen.dart';
+import 'batak_game_screen.dart';
+import '../services/room_service.dart';
 import '../services/auth_service.dart';
+import '../services/user_prefs_service.dart';
+import '../services/user_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -15,9 +21,10 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  final _prefsService = UserPrefsService();
+  final _userService = UserService();
+  final _prefsService = UserPrefsService(); // RoomService fallback için
   final _authService = AuthService();
-  String? _displayName;
+  final _roomService = RoomService();
   bool _linkingInProgress = false; // ignore: prefer_final_fields
 
   late AnimationController _pulseController;
@@ -26,7 +33,6 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
-    _loadName();
 
     _pulseController = AnimationController(
       vsync: this,
@@ -44,12 +50,8 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  Future<void> _loadName() async {
-    final name = await _prefsService.getDisplayName();
-    setState(() => _displayName = name);
-  }
-
   Future<void> _goToLobby() async {
+    // Profil stream'den ya da yerel önbellekten isim var mı kontrol et
     final hasName = await _prefsService.hasDisplayName();
     if (!hasName) {
       if (!mounted) return;
@@ -59,7 +61,6 @@ class _HomeScreenState extends State<HomeScreen>
           builder: (_) => SetNameScreen(
             onSaved: () {
               Navigator.pop(context);
-              _loadName();
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const LobbyScreen()),
@@ -77,12 +78,14 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _editName() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const SetNameScreen()),
-    );
-    _loadName();
+  void _goToProfile() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ProfileScreen(uid: uid)),
+      );
+    }
   }
 
   Future<void> _linkGoogle() async {
@@ -138,8 +141,84 @@ class _HomeScreenState extends State<HomeScreen>
                       ],
                     ),
                   ),
-                  // Alt slogan tamamen kaldırıldı
-                  const SizedBox(height: 40),
+                  // Devam Eden Oyun Bildirim Kartı
+                  StreamBuilder<Map<String, dynamic>?>(
+                    stream: _roomService.watchActiveRoomForUser(),
+                    builder: (context, activeSnap) {
+                      final activeData = activeSnap.data;
+                      if (activeData == null) return const SizedBox.shrink();
+
+                      final roomId = activeData['roomId'] as String;
+                      final gameType = activeData['gameType'] as String? ?? 'pisti';
+
+                      return Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(bottom: 24),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFC107).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFFFC107), width: 1.8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFFFC107).withValues(alpha: 0.25),
+                              blurRadius: 15,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            const Text(
+                              '🎮 Devam Eden Oyununuz Var!',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '(${gameType.toUpperCase()} - Tur: ${activeData['currentRound'] ?? 1})',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFFFC107),
+                                foregroundColor: Colors.black,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                              ),
+                              onPressed: () {
+                                if (gameType == 'batak') {
+                                  final players = Map<String, dynamic>.from(activeData['players'] ?? {});
+                                  final names = <String, String>{};
+                                  players.forEach((k, v) {
+                                    names[k] = (v as Map)['displayName'] as String? ?? 'Oyuncu';
+                                  });
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => BatakGameScreen(
+                                        roomId: roomId,
+                                        playerNames: names,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => GameScreen(roomId: roomId),
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                              label: const Text('Oyuna Tekrar Katıl', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
 
                   // OYNA butonu (koyu bordo) - Genişliği kısaltıldı
                   _buildPulseButton(
@@ -178,55 +257,64 @@ class _HomeScreenState extends State<HomeScreen>
                   // const SizedBox(height: 8),
                   // _buildTextButton('Krediler', Icons.info_outline, () {}),
 
-                  // İsim çubuğu (yeni temaya uyumlu)
-                  if (_displayName != null)
-                    GestureDetector(
-                      onTap: _editName,
-                      child: AnimatedBuilder(
-                        animation: _pulseAnimation,
-                        builder: (context, child) {
-                          final glowOpacity = 0.2 + (_pulseAnimation.value - 1.0) * 3;
-                          return Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.15),
+                  // ── İsim rozeti (Firestore stream'den) ─────────────────
+                  StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                    stream: _userService.watchProfile(),
+                    builder: (context, snapshot) {
+                      final name = snapshot.data?.data()?['displayName'] as String?;
+                      if (name == null || name.isEmpty) return const SizedBox.shrink();
+
+                      return GestureDetector(
+                        onTap: _goToProfile,
+                        child: AnimatedBuilder(
+                          animation: _pulseAnimation,
+                          builder: (context, child) {
+                            final glowOpacity =
+                                0.2 + (_pulseAnimation.value - 1.0) * 3;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.15),
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFFD4A24E)
+                                        .withValues(alpha: glowOpacity),
+                                    blurRadius: 8,
+                                    spreadRadius: 1,
+                                  ),
+                                ],
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFFD4A24E).withValues(alpha: glowOpacity),
-                                  blurRadius: 8,
-                                  spreadRadius: 1,
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.person,
-                                    color: Color(0xFFD4A24E), size: 16),
-                                const SizedBox(width: 6),
-                                Text(
-                                  _displayName!,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600),
-                                ),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.edit,
-                                    size: 14, color: Colors.white54),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.person,
+                                      color: Color(0xFFD4A24E), size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    name,
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  const Icon(Icons.account_circle_outlined,
+                                      size: 14, color: Colors.white54),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
                   const SizedBox(height: 8),
 
-                  // Google bağlantı
+                  // ── Google bağlantı durumu ────────────────────────────────
                   if (!_authService.isLinkedWithGoogle)
                     TextButton.icon(
                       onPressed: _linkingInProgress ? null : _linkGoogle,
@@ -248,9 +336,9 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     )
                   else
-                    Row(
+                    const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
+                      children: [
                         Icon(Icons.check_circle,
                             color: Colors.greenAccent, size: 14),
                         SizedBox(width: 6),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../services/room_service.dart';
 import '../theme/app_theme.dart';
 import 'game_screen.dart';
@@ -79,10 +80,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                 final status = data['status'] ?? 'waiting';
                 debugPrint('WaitingRoomScreen Veri: status=$status, playersCount=${players.length}, maxPlayers=$maxPlayers');
 
-                if (status == 'waiting' && players.length >= maxPlayers) {
-                  debugPrint('WaitingRoomScreen: Oda doldu, oyun başlatılıyor...');
-                  _roomService.startGameIfFull(widget.roomId);
-                }
+
 
                 if (status == 'playing' && !_navigated) {
                   _navigated = true;
@@ -206,6 +204,52 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                         ),
                       ),
                       const Spacer(),
+                      if (data['hostId'] == FirebaseAuth.instance.currentUser?.uid) ...[
+                        if (players.length >= maxPlayers)
+                          GoldButton(
+                            label: 'Oyunu Başlat',
+                            icon: Icons.play_arrow_rounded,
+                            onPressed: () async {
+                              try {
+                                await _roomService.startGame(widget.roomId);
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Hata: $e')),
+                                  );
+                                }
+                              }
+                            },
+                          )
+                        else
+                          const GoldButton(
+                            label: 'Oyuncu Bekleniyor...',
+                            icon: Icons.play_arrow_rounded,
+                            onPressed: null,
+                          ),
+                        const SizedBox(height: 12),
+                      ] else ...[
+                        if (players.length >= maxPlayers) ...[
+                          const Center(
+                            child: Column(
+                              children: [
+                                CircularProgressIndicator(color: AppColors.gold, strokeWidth: 2),
+                                SizedBox(height: 10),
+                                Text(
+                                  'Kurucunun oyunu başlatması bekleniyor...',
+                                  style: TextStyle(
+                                    color: AppColors.gold,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                      ],
                       GoldOutlineButton(
                         label: 'Odadan Ayrıl',
                         icon: Icons.exit_to_app,
